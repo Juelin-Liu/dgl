@@ -240,6 +240,7 @@ file(GLOB DGL_SRC
   src/geometry/*.cc
   src/geometry/cpu/*.cc
   src/partition/*.cc
+  src/dev/*.cc
 )
 
 file(GLOB_RECURSE DGL_SRC_1
@@ -272,6 +273,7 @@ if(USE_CUDA)
     src/geometry/cuda/*.cu
     src/graph/transform/cuda/*.cu
     src/graph/sampling/randomwalks/*.cu
+    src/dev/cuda/*.cu
   )
   list(APPEND DGL_SRC ${DGL_CUDA_SRC})
   dgl_config_cuda(DGL_LINKER_LIBS)
