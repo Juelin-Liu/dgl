@@ -32,7 +32,6 @@ __device__ void map_vertex_ids(
     const IdType* const global, IdType* const new_global,
     const IdType num_vertices, const DeviceOrderedHashTable<IdType>& table) {
   assert(BLOCK_SIZE == blockDim.x);
-
   using Mapping = typename OrderedHashTable<IdType>::Mapping;
 
   const IdType tile_start = TILE_SIZE * blockIdx.x;
@@ -44,6 +43,7 @@ __device__ void map_vertex_ids(
     new_global[idx] = mapping.local;
   }
 }
+
 
 /**
  * @brief Generate mapped edge endpoint ids.
@@ -78,15 +78,42 @@ __global__ void map_edge_ids(
         global_dsts_device, new_global_dsts_device, num_edges, dst_mapping);
   }
 }
+
+
+/**
+ * @brief Generate mapped edge endpoint ids.
+ *
+ * @tparam IdType The type of id.
+ * @tparam BLOCK_SIZE The size of each thread block.
+ * @tparam TILE_SIZE The number of edges to process per thread block.
+ * @param global_srcs_device The source ids to map.
+ * @param new_global_srcs_device The mapped source ids (output).
+ * @param global_dsts_device The destination ids to map.
+ * @param new_global_dsts_device The mapped destination ids (output).
+ * @param num_edges The number of edges to map.
+ * @param src_mapping The mapping of sources ids.
+ * @param dst_mapping The mapping of destination ids.
+ */
+template <typename IdType, int BLOCK_SIZE, IdType TILE_SIZE>
+__global__ void map_edge_ids(
+    const IdType* const global_srcs_device,
+    IdType* const new_global_srcs_device,
+    const IdType num_edges,
+    DeviceOrderedHashTable<IdType> src_mapping) {
+  assert(BLOCK_SIZE == blockDim.x);
+  assert(1 == gridDim.y);
+  map_vertex_ids<IdType, BLOCK_SIZE, TILE_SIZE>(
+        global_srcs_device, new_global_srcs_device, num_edges, src_mapping);
+}
+
 }  // namespace impl
 template <typename IdType>
-void GPUMapEdges(aten::COOMatrix& mat, const OrderedHashTable<IdType>& hash) {
+void GPUMapEdges(aten::COOMatrix& mat, const OrderedHashTable<IdType>& hash, cudaStream_t stream) {
   constexpr const int BLOCK_SIZE = 128;
   constexpr const size_t TILE_SIZE = 1024;
   int64_t num_edges = mat.col.NumElements();
   const dim3 grid(impl::RoundUpDiv<IdType>(num_edges, TILE_SIZE), 2);
   const dim3 block(BLOCK_SIZE);
-  auto stream = runtime::getCurrentCUDAStream();
   // map the srcs
   CUDA_KERNEL_CALL(
       (impl::map_edge_ids<IdType, BLOCK_SIZE, TILE_SIZE>), grid, block, 0,
@@ -94,8 +121,33 @@ void GPUMapEdges(aten::COOMatrix& mat, const OrderedHashTable<IdType>& hash) {
       mat.col.Ptr<IdType>(), mat.col.Ptr<IdType>(), num_edges,
       hash.DeviceHandle(), hash.DeviceHandle());
 };
+
+template <typename IdType>
+void GPUMapEdges(
+    NDArray in_rows, NDArray ret_row,
+    const runtime::cuda::OrderedHashTable<IdType>& hash_table, cudaStream_t stream) {
+  CHECK_GE(ret_row.NumElements(), in_rows.NumElements());
+  constexpr const int BLOCK_SIZE = 128;
+  constexpr const size_t TILE_SIZE = 1024;
+  int64_t nrows = in_rows.NumElements();
+  const size_t num_tiles = (nrows + TILE_SIZE - 1) / TILE_SIZE;
+  const dim3 grid(num_tiles, 1);
+  const dim3 block(BLOCK_SIZE);
+  auto table = hash_table.DeviceHandle();
+  // map the srcs
+  impl::map_edge_ids<IdType, BLOCK_SIZE, TILE_SIZE><<<grid, block, 0,
+      stream>>>( in_rows.Ptr<IdType>(), ret_row.Ptr<IdType>(), nrows,
+      table);
+  auto device = runtime::DeviceAPI::Get(in_rows->ctx);
+  device->StreamSync(in_rows->ctx, stream);
+};
 template void GPUMapEdges<int32_t>(
-    aten::COOMatrix&, const OrderedHashTable<int32_t>&);
+    aten::COOMatrix&, const OrderedHashTable<int32_t>&, cudaStream_t);
 template void GPUMapEdges<int64_t>(
-    aten::COOMatrix&, const OrderedHashTable<int64_t>&);
+    aten::COOMatrix&, const OrderedHashTable<int64_t>&, cudaStream_t);
+
+template void GPUMapEdges<int32_t>(
+    NDArray, NDArray, const OrderedHashTable<int32_t>& hash_table, cudaStream_t);
+template void GPUMapEdges<int64_t>(
+    NDArray, NDArray, const OrderedHashTable<int64_t>& hash_table, cudaStream_t);
 }  // namespace dgl::dev

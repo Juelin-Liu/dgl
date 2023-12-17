@@ -16,6 +16,7 @@
 #include "../runtime/cuda/cuda_common.h"
 #include "../runtime/cuda/cuda_hashtable.cuh"
 #include "cuda/map_edges.cuh"
+#include "cuda/batch_rowwise_sampling.cuh"
 
 namespace dgl::dev {
 
@@ -25,6 +26,7 @@ struct GraphBatch {
   std::vector<aten::COOMatrix> _blocks;
   std::vector<NDArray> _frontiers;
   std::vector<HeteroGraphRef> _blockrefs;
+  GraphBatch() = default;
   GraphBatch(
       int64_t batch_id, std::vector<NDArray> frontiers,
       std::vector<aten::COOMatrix> blocks)
@@ -33,7 +35,7 @@ struct GraphBatch {
         _frontiers{std::move(frontiers)} {}
 };
 
-class SamplerObject {
+class Sampler {
  private:
   aten::CSRMatrix _csc;
   std::vector<int64_t> _fanouts;
@@ -70,15 +72,15 @@ class SamplerObject {
   }
 
  public:
-  static std::shared_ptr<SamplerObject> const Global() {
-    static auto single_instance = std::make_shared<SamplerObject>();
+  static std::shared_ptr<Sampler> const Global() {
+    static auto single_instance = std::make_shared<Sampler>();
     return single_instance;
   }
 
   void SetGraph(NDArray indptr, NDArray indices, NDArray data) {
-    CHECK(indptr.IsPinned() || indptr->ctx.device_id != 0)
+    CHECK(indptr.IsPinned() || indptr->ctx.device_type != kDGLCPU)
         << "Indptr must be pinned or on gpu";
-    CHECK(indices.IsPinned() || indices->ctx.device_id != 0)
+    CHECK(indices.IsPinned() || indices->ctx.device_type != kDGLCPU)
         << "Indices must be pinned or on gpu";
     CHECK(
         data.IsPinned() || data->ctx == indices->ctx || data.NumElements() == 0)
@@ -91,10 +93,11 @@ class SamplerObject {
       _csc = aten::CSRMatrix(nrows, ncols, indptr, indices);
     else
       _csc = aten::CSRMatrix(nrows, ncols, indptr, indices, data);
+    _next_id = 0;
   }
 
-  void SetFanout(std::vector<int64_t> fanouts) { _fanouts = fanouts; }
-  void SetPoolSize(int64_t pool_size) { _pool_size = pool_size; }
+  void SetFanout(std::vector<int64_t> fanouts) { _fanouts = fanouts; _next_id = 0;}
+  void SetPoolSize(int64_t pool_size) { _pool_size = pool_size; _next_id = 0;}
 
   /*
    * seeds: the root vertex to be sampled from the graph
@@ -103,7 +106,8 @@ class SamplerObject {
   int64_t SampleBatch(NDArray seeds, bool replace) {
     CHECK(seeds.IsPinned() || seeds->ctx.device_type != DGLDeviceType::kDGLCPU)
         << "Seeds must be pinned or in GPU memory";
-    while (_batches.size() >= _pool_size) _batches.pop_front();
+//    while (_batches.size() >= _pool_size) _batches.pop_front();
+    _batches.clear();
     std::vector<aten::COOMatrix> blocks;
     std::vector<NDArray> frontiers = {seeds};
 
@@ -120,6 +124,64 @@ class SamplerObject {
         std::make_shared<GraphBatch>(batch_id, frontiers, blocks));
     _next_id++;
     return batch_id;
+  }
+
+  /*
+   * seeds: the root vertex to be sampled from the graph
+   * replace: use replace sampling or not
+   */
+  int64_t SampleBatches(const std::vector<NDArray>& seeds, bool replace, int64_t batch_layer) {
+    CHECK(seeds.size()>0);
+    CHECK(seeds.at(0).IsPinned() || seeds.at(0)->ctx.device_type != DGLDeviceType::kDGLCPU)
+        << "Seeds must be pinned or in GPU memory";
+    _batches.clear();
+    std::vector<std::vector<NDArray>> all_frontiers = {seeds};
+    std::vector<std::vector<aten::COOMatrix>> all_blocks;
+    int num_batches = seeds.size();
+    int init_id = _next_id;
+
+    for (size_t layer = 0; layer < _fanouts.size(); layer++) {
+      std::vector<aten::COOMatrix> cur_layer_blocks;
+      int64_t num_samples = _fanouts.at(layer);
+      const auto&cur_layer_frontiers = all_frontiers.at(layer);
+      if (layer < batch_layer) {
+        for (const auto& rows: cur_layer_frontiers) {
+          aten::COOMatrix block = aten::CSRRowWiseSampling(
+              _csc, rows, num_samples, aten::NullArray(), replace);
+          cur_layer_blocks.push_back(block);
+        }
+      } else {
+        ATEN_ID_TYPE_SWITCH(cur_layer_frontiers.at(0)->dtype, IdType, {
+          cur_layer_blocks = dev::CSRRowWiseSamplingUniformBatch<kDGLCUDA, IdType>(_csc, cur_layer_frontiers, num_samples, replace);
+        });
+      }
+      CHECK_EQ(cur_layer_blocks.size(), cur_layer_frontiers.size());
+      std::vector<NDArray> next_layer_frontiers;
+
+      for (size_t i = 0; i < cur_layer_frontiers.size(); i++) {
+        auto & frontier = cur_layer_frontiers.at(i);
+        auto & block = cur_layer_blocks.at(i);
+        next_layer_frontiers.push_back(Unique({frontier, block.col}));
+      }
+      all_frontiers.push_back(next_layer_frontiers);
+      all_blocks.push_back(cur_layer_blocks);
+    }
+
+    for (int64_t i = 0; i < num_batches; i++) {
+      std::vector<NDArray> frontiers;
+      std::vector<aten::COOMatrix> blocks;
+      for (size_t layer = 0; layer < _fanouts.size(); layer++){
+        blocks.push_back(all_blocks.at(layer).at(i));
+      }
+      for (size_t layer = 0; layer <= _fanouts.size(); layer++){
+        frontiers.push_back(all_frontiers.at(layer).at(i));
+      }
+      int64_t batch_id = _next_id;
+      _batches.push_back(
+          std::make_shared<GraphBatch>(batch_id, frontiers, blocks));
+      _next_id++;
+    }
+    return _next_id;
   }
 
   HeteroGraphRef GetBlock(
@@ -147,7 +209,7 @@ class SamplerObject {
             runtime::cuda::OrderedHashTable<IdType>(num_input, ctx, stream);
         hash_table.FillWithUnique(allnodes.Ptr<IdType>(), num_input, stream);
         for (auto &block : batch->_blocks) {
-          GPUMapEdges<IdType>(block, hash_table);
+          GPUMapEdges<IdType>(block, hash_table, stream);
         }
       });
       batch->reindexed = true;
@@ -194,6 +256,19 @@ class SamplerObject {
     CHECK(found) << "GetOutputNode batch id " << batch_id << " is not found in the pool";
     CHECK(batch->_frontiers.size() >= 1);
     return batch->_frontiers.at(0);
+  }
+  NDArray GetBlockData(int64_t batch_id, int64_t layer) {
+    std::shared_ptr<GraphBatch> batch{nullptr};
+    bool found = false;
+    for (auto ptr : _batches) {
+      if (ptr->_batch_id == batch_id) {
+        batch = ptr;
+        found = true;
+        break;
+      }
+    }
+    CHECK(found) << "GetInputNode batch id " << batch_id << " is not found in the pool";
+    return batch->_blocks.at(layer).data;
   }
 };
 

@@ -101,6 +101,8 @@ class DeviceOrderedHashTable {
    * @return An iterator to the mapping.
    */
   inline __device__ ConstIterator Search(const IdType id) const {
+    assert(id >= 0);
+    assert(Contains(id));
     const IdType pos = SearchForPosition(id);
 
     return &table_[pos];

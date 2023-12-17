@@ -18,6 +18,9 @@ def SetFanout(fanout: list[int]) -> None:
 def SampleBatch(seeds: Tensor, replace : bool = False) -> int:
     return _CAPI_SampleBatch(F.zerocopy_to_dgl_ndarray(seeds), replace)
     
+def SampleBatches(seeds: Tensor, batch_len: int, replace: bool, batch_layer = 2):
+    return _CAPI_SampleBatches(F.zerocopy_to_dgl_ndarray(seeds), batch_len, replace, batch_layer)
+
 def GetBlocks(batch_id: int, reindex = True, layers: int = 3)->(Tensor, Tensor, list[DGLBlock]):
     input_node = _CAPI_GetInputNode(batch_id)
     input_node = F.zerocopy_from_dgl_ndarray(input_node)
@@ -31,3 +34,6 @@ def GetBlocks(batch_id: int, reindex = True, layers: int = 3)->(Tensor, Tensor, 
     
     return input_node, output_node, blocks
 
+def GetBlockData(batch_id: int, layer: int):
+    data = _CAPI_GetBlockData(batch_id, layer)
+    return F.zerocopy_from_dgl_ndarray(data)
