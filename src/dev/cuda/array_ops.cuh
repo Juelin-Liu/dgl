@@ -17,5 +17,8 @@ namespace dgl::dev
 
     template<DGLDeviceType XPU, typename IdType>
     NDArray Flagged(const NDArray& bitmap, DGLContext ctx);
+
+    template<DGLDeviceType XPU, typename IdType>
+    void Increment(NDArray& count, const NDArray& indices);
 }
 #endif  // DGL_ARRAY_OPS_CUH

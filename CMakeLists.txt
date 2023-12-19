@@ -19,7 +19,7 @@ include(cmake/util/FindCUDA.cmake)
 dgl_option(BUILD_TYPE "Type of the build: dev, dogfood or release" "dev")
 message(STATUS "Build for ${BUILD_TYPE}")
 
-dgl_option(USE_CUDA "Build with CUDA" OFF)
+dgl_option(USE_CUDA "Build with CUDA" ON)
 dgl_option(TORCH_PYTHON_INTERPS "Python interpreter for building sub-components" python3)
 
 # Conda build related options.

@@ -93,8 +93,17 @@ DGL_REGISTER_GLOBAL("dev._CAPI_GetOutputNode")
 DGL_REGISTER_GLOBAL("dev._CAPI_GetBlockData")
     .set_body([](DGLArgs args, DGLRetValue *rv) {
       int64_t batch_id = args[0];
-      int64_t layer = args[0];
+      int64_t layer = args[1];
       auto sampler = Sampler::Global();
       *rv = sampler->GetBlockData(batch_id, layer);
+    });
+
+DGL_REGISTER_GLOBAL("dev._CAPI_Increment")
+    .set_body([](DGLArgs args, DGLRetValue *rv) {
+      NDArray count = args[0];
+      NDArray row = args[1];
+      ATEN_ID_TYPE_SWITCH(count->dtype, IdType, {
+        Increment<kDGLCUDA, IdType>(count, row);
+      });
     });
 }  // namespace dgl::dev
