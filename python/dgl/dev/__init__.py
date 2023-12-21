@@ -37,3 +37,6 @@ def GetBlocks(batch_id: int, reindex = True, layers: int = 3)->(Tensor, Tensor, 
 def GetBlockData(batch_id: int, layer: int):
     data = _CAPI_GetBlockData(batch_id, layer)
     return F.zerocopy_from_dgl_ndarray(data)
+
+def Increment(array: Tensor, row: Tensor):
+    return _CAPI_Increment(F.zerocopy_to_dgl_ndarray(array), F.zerocopy_to_dgl_ndarray(row))
