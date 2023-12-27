@@ -8,24 +8,24 @@ _init_api("dgl.dev", __name__)
 def SetGraph(indptr: Tensor, indices: Tensor, data: Tensor = None) -> None:
     if data == None:
         data = Tensor([])
-    _CAPI_SetGraph(F.zerocopy_to_dgl_ndarray(indptr), 
-                   F.zerocopy_to_dgl_ndarray(indices), 
-                   F.zerocopy_to_dgl_ndarray(data))
+    _CAPI_SetGraph(F.to_dgl_nd(indptr), 
+                   F.to_dgl_nd(indices), 
+                   F.to_dgl_nd(data))
 
 def SetFanout(fanout: list[int]) -> None:
     _CAPI_SetFanout(fanout)
 
 def SampleBatch(seeds: Tensor, replace : bool = False) -> int:
-    return _CAPI_SampleBatch(F.zerocopy_to_dgl_ndarray(seeds), replace)
+    return _CAPI_SampleBatch(F.to_dgl_nd(seeds), replace)
     
 def SampleBatches(seeds: Tensor, batch_len: int, replace: bool, batch_layer = 2):
-    return _CAPI_SampleBatches(F.zerocopy_to_dgl_ndarray(seeds), batch_len, replace, batch_layer)
+    return _CAPI_SampleBatches(F.to_dgl_nd(seeds), batch_len, replace, batch_layer)
 
-def GetBlocks(batch_id: int, reindex = True, layers: int = 3)->(Tensor, Tensor, list[DGLBlock]):
+def GetBlocks(batch_id: int, reindex = True, layers: int = 3):
     input_node = _CAPI_GetInputNode(batch_id)
-    input_node = F.zerocopy_from_dgl_ndarray(input_node)
+    input_node = F.from_dgl_nd(input_node)
     output_node = _CAPI_GetOutputNode(batch_id)
-    output_node = F.zerocopy_from_dgl_ndarray(output_node)
+    output_node = F.from_dgl_nd(output_node)
     blocks = []
     for layer in range(layers):
         gidx = _CAPI_GetBlock(batch_id, layer, reindex)
@@ -36,7 +36,18 @@ def GetBlocks(batch_id: int, reindex = True, layers: int = 3)->(Tensor, Tensor, 
 
 def GetBlockData(batch_id: int, layer: int):
     data = _CAPI_GetBlockData(batch_id, layer)
-    return F.zerocopy_from_dgl_ndarray(data)
+    return F.from_dgl_nd(data)
 
 def Increment(array: Tensor, row: Tensor):
-    return _CAPI_Increment(F.zerocopy_to_dgl_ndarray(array), F.zerocopy_to_dgl_ndarray(row))
+    return _CAPI_Increment(F.to_dgl_nd(array), F.to_dgl_nd(row))
+
+def COO2CSR(v_num: int, src: Tensor, dst: Tensor, data: Tensor):
+    src = F.to_dgl_nd(src)
+    dst = F.to_dgl_nd(dst)
+    data = F.to_dgl_nd(data)
+    ret = _CAPI_COO2CSR(v_num, src, dst, data)
+    degree = F.from_dgl_nd(ret(0))
+    indptr = F.from_dgl_nd(ret(1))
+    indices = F.from_dgl_nd(ret(2))
+    data = F.from_dgl_nd(ret(3))
+    return (degree, indptr, indices, data)

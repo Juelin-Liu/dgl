@@ -25,3 +25,6 @@
 [submodule "third_party/pcg"]
 	path = third_party/pcg
 	url = https://github.com/imneme/pcg-cpp.git
+[submodule "third_party/oneTBB"]
+	path = third_party/oneTBB
+	url = https://github.com/oneapi-src/oneTBB.git

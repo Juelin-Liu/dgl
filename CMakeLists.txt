@@ -279,7 +279,8 @@ if(USE_CUDA)
   dgl_config_cuda(DGL_LINKER_LIBS)
   cuda_add_library(dgl SHARED ${DGL_SRC})
 else(USE_CUDA)
-  add_library(dgl SHARED ${DGL_SRC})
+  add_library(dgl SHARED ${DGL_SRC}
+          src/dev/coo2csr.cc)
 endif(USE_CUDA)
 
 # include directories
@@ -349,11 +350,12 @@ else(EXTERNAL_PHMAP_PATH)
   target_include_directories(dgl PRIVATE "third_party/phmap")
 endif(EXTERNAL_PHMAP_PATH)
 
-
+add_subdirectory("third_party/oneTBB")
 target_include_directories(dgl PRIVATE "tensoradapter/include")
 target_include_directories(dgl PRIVATE "third_party/pcg/include")
-
-
+target_include_directories(dgl PRIVATE "third_party/oneTBB/include")
+list(APPEND DGL_LINKER_LIBS TBB::tbb)
+list(APPEND DGL_LINKER_LIBS TBB::tbbmalloc)
 
 if(EXTERNAL_NANOFLANN_PATH)
   include_directories(SYSTEM ${EXTERNAL_NANOFLANN_PATH})
