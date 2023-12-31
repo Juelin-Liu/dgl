@@ -4,6 +4,7 @@
 
 #include "array_ops.cuh"
 #include "../../runtime/cuda/cuda_common.h"
+#include <cstdint>
 #include <cub/cub.cuh>
 #include "../../array/cuda/atomic.cuh"
 
@@ -34,6 +35,16 @@ namespace dgl::dev
             if (tIdx < num_item) {
                 const IdType rIdx = row[tIdx];
                 aten::cuda::AtomicAdd(array + rIdx, static_cast<IdType>(1));
+            }
+        }
+
+        template<typename CounterType, typename IndexType>
+        __global__ void Increment(CounterType * array, const int64_t array_len, 
+                                const IndexType * row, const int64_t num_item) {
+            const int64_t tIdx = threadIdx.x + blockIdx.x * blockDim.x;
+            if (tIdx < num_item) {
+                const IndexType rIdx = row[tIdx];
+                aten::cuda::AtomicAdd(array + rIdx, static_cast<CounterType>(1));
             }
         }
     } // impl
@@ -108,11 +119,25 @@ namespace dgl::dev
         device->StreamSync(count->ctx, stream);
     }; 
 
+    template<DGLDeviceType XPU, typename CounterType, typename IndexType>
+    void Increment(NDArray& count, const NDArray& row){
+        CHECK_EQ(count->ctx, row->ctx);
+        const dim3 block(256);
+        const dim3 grid((row.NumElements() + block.x - 1) / block.x);
+        auto stream = runtime::getCurrentCUDAStream();
+        CUDA_KERNEL_CALL(impl::Increment, grid, block, 0, stream, count.Ptr<CounterType>(), count.NumElements(), row.Ptr<IndexType>(), row.NumElements());
+        auto device = runtime::DeviceAPI::Get(count->ctx);
+        device->StreamSync(count->ctx, stream);
+    }; 
+
     template void Mask<kDGLCUDA, int32_t>(NDArray&, NDArray);
     template void Mask<kDGLCUDA, int64_t>(NDArray&, NDArray);
     template NDArray Flagged<kDGLCUDA, int32_t>(const NDArray&, DGLContext);
     template NDArray Flagged<kDGLCUDA, int64_t>(const NDArray&, DGLContext);
     template void Increment<kDGLCUDA, int32_t>(NDArray&, const NDArray&);
     template void Increment<kDGLCUDA, int64_t>(NDArray&, const NDArray&);
-
+    template void Increment<kDGLCUDA, int32_t, int32_t>(NDArray&, const NDArray&);
+    template void Increment<kDGLCUDA, int64_t, int32_t>(NDArray&, const NDArray&);
+    template void Increment<kDGLCUDA, int32_t, int64_t>(NDArray&, const NDArray&);
+    template void Increment<kDGLCUDA, int64_t, int64_t>(NDArray&, const NDArray&);
 }

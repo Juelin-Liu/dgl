@@ -20,5 +20,8 @@ namespace dgl::dev
 
     template<DGLDeviceType XPU, typename IdType>
     void Increment(NDArray& count, const NDArray& indices);
+
+    template<DGLDeviceType XPU, typename CounterType, typename IndexType>
+    void Increment(NDArray& count, const NDArray& indices);
 }
 #endif  // DGL_ARRAY_OPS_CUH

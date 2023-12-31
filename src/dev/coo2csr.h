@@ -12,6 +12,9 @@
 #include <algorithm>
 #include <numeric>
 #include <oneapi/tbb/parallel_sort.h>
+#include <atomic>
+#include <filesystem>
+#include <fstream>
 
 namespace dgl::dev
 {
@@ -52,11 +55,10 @@ namespace dgl::dev
     }
   };
 
-  std::tuple<IdArray, IdArray, IdArray, IdArray> COO2CSR(int64_t v_num, NDArray src, NDArray dst, NDArray data) {
+  std::tuple<IdArray, IdArray, IdArray> COO2CSR(int64_t v_num, NDArray src, NDArray dst, NDArray data) {
     auto dtype = src->dtype;
-    auto ctx = src->ctx;
     int64_t e_num = src.NumElements();
-    LOG(INFO) << "COO2CSR edges: " << e_num << " | vertices: " << v_num;
+    LOG(INFO) << "COO2CSR v_num: " << v_num << " | e_num: " << e_num;
     typedef std::vector<EdgeWithData> EdgeVec;
     EdgeVec edge_vec;
     edge_vec.resize(2 * e_num);
@@ -64,7 +66,6 @@ namespace dgl::dev
       auto src_ptr = src.Ptr<IdType>();
       auto dst_ptr = dst.Ptr<IdType>();
       auto data_ptr = data.Ptr<IdType>();
-
       tbb::parallel_for( tbb::blocked_range<int64_t >(0, e_num),
                        [&](tbb::blocked_range<int64_t > r)
       {
@@ -76,48 +77,43 @@ namespace dgl::dev
       });
     });
     LOG(INFO) << "COO2CSR start sorting";
-
-    // tbb::parallel_sort(edge_vec.begin(), edge_vec.end(), [](const EdgeWithData a, const EdgeWithData b)->bool {
-    //   if (a._src == b._src) {
-    //     return a._dst < b._dst;
-    //   } else {
-    //     return a._src < b._dst;
-    //   }
-    // });
     tbb::parallel_sort(edge_vec.begin(), edge_vec.end());
     edge_vec.erase(std::unique(edge_vec.begin(), edge_vec.end()), edge_vec.end());
     edge_vec.shrink_to_fit();
     int64_t cur_e_num = edge_vec.size();
-    IdArray degrees = aten::NewIdArray(v_num);
     IdArray indptr = aten::NewIdArray(v_num + 1);
+    std::vector<std::atomic<int>> degree(v_num + 1);
     IdArray indices = aten::NewIdArray(cur_e_num);
     IdArray retdata = aten::NewIdArray(cur_e_num);
-
     int64_t * indices_ptr = indices.Ptr<int64_t>();
     int64_t * retdata_ptr = retdata.Ptr<int64_t>();
-    int64_t * degrees_ptr = degrees.Ptr<int64_t>();
-    memset(degrees.Ptr<void>(), 0, sizeof(int64_t) * v_num);
-    memset(indptr.Ptr<void>(), 0, sizeof(int64_t) * (v_num + 1));
-    for (int64_t i = 0; i < edge_vec.size(); i++) {
-      const EdgeWithData& e = edge_vec.at(i);
-      degrees_ptr[e._src]++;
-      indices_ptr[i] = e._dst;
-      retdata_ptr[i] = e._data;
-    }
+    LOG(INFO) << "COO2CSR compute degree";
+
+    tbb::parallel_for( tbb::blocked_range<int64_t >(0, edge_vec.size()),
+                      [&](tbb::blocked_range<int64_t > r)
+    {
+        for (int64_t i=r.begin(); i<r.end(); i++)
+        {
+          const EdgeWithData& e = edge_vec.at(i);
+          degree.at(e._src)++;
+          indices_ptr[i] = e._dst;
+          retdata_ptr[i] = e._data;
+        }
+    });
+
     LOG(INFO) << "COO2CSR compute indptr";
     auto out_start = indptr.Ptr<int64_t>();
-    auto out_end = std::exclusive_scan(degrees_ptr, degrees_ptr + v_num + 1, out_start, 0);
+    auto out_end = std::exclusive_scan(degree.begin(), degree.end(), out_start, 0ll);
 
     CHECK_EQ(out_end - out_start, v_num + 1);
     CHECK_EQ(out_start[v_num], edge_vec.size());
-    return {degrees, indptr, indices, retdata};
+    return {indptr, indices, retdata};
   } // COO2CSR
 
-  std::tuple<IdArray, IdArray, IdArray> COO2CSR(int64_t v_num, NDArray src, NDArray dst) {
+  std::tuple<IdArray, IdArray> COO2CSR(int64_t v_num, NDArray src, NDArray dst) {
     auto dtype = src->dtype;
-    auto ctx = src->ctx;
     int64_t e_num = src.NumElements();
-    LOG(INFO) << "COO2CSR edges: " << e_num << " | vertices: " << v_num;
+    LOG(INFO) << "COO2CSR v_num: " << v_num << " | e_num: " << e_num;
     typedef std::vector<Edge> EdgeVec;
     EdgeVec edge_vec;
     edge_vec.resize(2 * e_num);
@@ -135,39 +131,165 @@ namespace dgl::dev
       });
     });
     LOG(INFO) << "COO2CSR start sorting";
-
-    // tbb::parallel_sort(edge_vec.begin(), edge_vec.end(), [](const Edge& a, const Edge& b)->bool {
-    //   if (a._src == b._src) {
-    //     return a._dst < b._dst;
-    //   } else {
-    //     return a._src < b._dst;
-    //   }
-    // });
     tbb::parallel_sort(edge_vec.begin(), edge_vec.end());
     edge_vec.erase(std::unique(edge_vec.begin(), edge_vec.end()), edge_vec.end());
     edge_vec.shrink_to_fit();
     int64_t cur_e_num = edge_vec.size();
-    IdArray degrees = aten::NewIdArray(v_num);
+    std::vector<std::atomic<int>> degree(v_num + 1);
     IdArray indptr = aten::NewIdArray(v_num + 1);
     IdArray indices = aten::NewIdArray(cur_e_num);
 
     int64_t * indices_ptr = indices.Ptr<int64_t>();
-    int64_t * degrees_ptr = degrees.Ptr<int64_t>();
     int64_t * out_start = indptr.Ptr<int64_t>();
-    memset(degrees.Ptr<void>(), 0, sizeof(int64_t) * v_num);
-    memset(indptr.Ptr<void>(), 0, sizeof(int64_t) * (v_num + 1));
-    for (int64_t i = 0; i < edge_vec.size(); i++) {
-      const Edge& e = edge_vec.at(i);
-      degrees_ptr[e._src]++;
-      indices_ptr[i] = e._dst;
-    }
+    LOG(INFO) << "COO2CSR compute degree";
+    tbb::parallel_for( tbb::blocked_range<int64_t >(0, edge_vec.size()),
+                      [&](tbb::blocked_range<int64_t > r)
+    {
+        for (int64_t i=r.begin(); i<r.end(); i++)
+        {
+          const Edge& e = edge_vec.at(i);
+          degree.at(e._src)++;
+          indices_ptr[i] = e._dst;
+        }
+    });
+
     LOG(INFO) << "COO2CSR compute indptr";
-    auto out_end = std::exclusive_scan(degrees_ptr, degrees_ptr + v_num + 1, out_start, 0);
+    auto out_end = std::exclusive_scan(degree.begin(), degree.end(), out_start, 0ll);
 
     CHECK_EQ(out_end - out_start, v_num + 1);
     CHECK_EQ(out_start[v_num], edge_vec.size());
-    return {degrees, indptr, indices};
+    return {indptr, indices};
   } // COO2CSR
+
+  // Remove vertices with 0 degree
+  std::pair<NDArray, NDArray> CompactCSR(NDArray in_indptr, NDArray in_indices) {
+    int64_t v_num = in_indptr.NumElements() - 1;
+    int64_t e_num = in_indices.NumElements();
+    LOG(INFO) << "CompactCSR v_num before compact = " << v_num;
+
+    IdArray out_indices = in_indices;
+    int64_t * _in_indices = in_indices.Ptr<int64_t>();
+    int64_t * _out_indices = out_indices.Ptr<int64_t>();
+    const int64_t * _in_indptr = in_indptr.Ptr<int64_t>();
+    std::vector<int64_t> degree(v_num, 0);
+    std::vector<int64_t> org2new(v_num, 0);
+    tbb::parallel_for( tbb::blocked_range<int64_t >(0, v_num),
+                      [&](tbb::blocked_range<int64_t > r)
+    {
+        for (int64_t i=r.begin(); i<r.end(); i++)
+        {
+          degree.at(i) = _in_indptr[i + 1] - _in_indptr[i];
+        }
+    });
+    int64_t cur_v_num = 0;
+
+    std::vector<int64_t> compacted_degree;
+
+    for (int64_t i = 0; i < v_num; i++) {
+      int64_t d = degree.at(i);
+      if (d > 0) {
+        org2new[i] = cur_v_num++;
+        compacted_degree.push_back(d);
+      }
+    }
+
+    compacted_degree.push_back(0); // make exclusive scan work
+
+    IdArray out_indptr = aten::NewIdArray(cur_v_num + 1);
+    auto out_indptr_start = out_indptr.Ptr<int64_t>();
+    auto out_indptr_end = std::exclusive_scan(compacted_degree.begin(), compacted_degree.end(), out_indptr_start, 0ll);
+    CHECK_EQ(out_indptr_start[cur_v_num], e_num);
+    tbb::parallel_for( tbb::blocked_range<int64_t >(0, e_num),
+                      [&](tbb::blocked_range<int64_t > r)
+    {
+        for (int64_t i=r.begin(); i<r.end(); i++)
+        {
+          _out_indices[i] = org2new[_in_indices[i]];
+        }
+    });
+    
+    LOG(INFO) << "CompactCSR v_num after compact = " << cur_v_num;
+    return {out_indptr, out_indices};
+  }
+
+  inline bool nextSNAPline(std::ifstream &infile, std::string &line, std::istringstream &iss,
+                            int64_t &src, int64_t &dest) {
+      do {
+          if(!getline(infile, line)) return false;
+      } while(line.length() == 0 || line[0] == '#');
+      iss.clear();
+      iss.str(line);
+      return !!(iss >> src >> dest);
+  }
+
+  inline void getID(std::vector<int64_t> &idMap, int64_t &id, int64_t &nextID) {
+      if(idMap.size() <= id) {
+          idMap.resize(id + 4096, -1);
+      }
+
+      if(idMap.at(id) == -1) {
+          idMap.at(id) = nextID;
+          nextID++;
+      }
+      id = idMap.at(id);
+  }
+
+  std::pair<NDArray, NDArray> LoadSNAP(std::filesystem::path data_file){
+    LOG(INFO) << "Loading from file: " << data_file;
+    typedef std::vector<Edge> EdgeVec;
+    EdgeVec edge_vec;
+    std::vector<int64_t > idMap;
+    int64_t max_id = 0, src = 0, dst = 0, nextID = 0, line_num = 0;
+    std::string line;
+    std::istringstream iss;
+    std::ifstream infile(data_file.c_str());
+    while (nextSNAPline(infile, line, iss, src, dst)) {
+        if (src == dst) continue;
+        getID(idMap, src, nextID);
+        getID(idMap, dst, nextID);
+        max_id = std::max(max_id, src);
+        max_id = std::max(max_id, dst);
+        edge_vec.push_back({src, dst}); 
+        edge_vec.push_back({dst, src}); // assume undirected
+        line_num++;
+        if (line_num % int(2e7) == 0){
+            LOG(INFO) << "LoadSNAP Read: " << line_num / int(1e6) << "M edges";
+        }
+    }
+
+    tbb::parallel_sort(edge_vec.begin(), edge_vec.end());
+              
+    edge_vec.erase(std::unique(edge_vec.begin(), edge_vec.end()), edge_vec.end());
+    edge_vec.shrink_to_fit();
+    int64_t v_num = nextID;
+    int64_t e_num = edge_vec.size();
+    LOG(INFO) << "LoadSNAP v_num: " << v_num << " | e_num: " << e_num;
+
+    std::vector<std::atomic<int>> degree(v_num + 1);
+    IdArray indptr = aten::NewIdArray(v_num + 1);
+    IdArray indices = aten::NewIdArray(e_num);
+
+    int64_t * indices_ptr = indices.Ptr<int64_t>();
+    int64_t * out_start = indptr.Ptr<int64_t>();
+    LOG(INFO) << "LoadSNAP compute degree";
+    tbb::parallel_for( tbb::blocked_range<int64_t >(0, edge_vec.size()),
+                      [&](tbb::blocked_range<int64_t > r)
+    {
+        for (int64_t i=r.begin(); i<r.end(); i++)
+        {
+          const Edge& e = edge_vec.at(i);
+          degree.at(e._src)++;
+          indices_ptr[i] = e._dst;
+        }
+    });
+
+    LOG(INFO) << "LoadSNAP compute indptr";
+    auto out_end = std::exclusive_scan(degree.begin(), degree.end(), out_start, 0ll);
+
+    CHECK_EQ(out_end - out_start, v_num + 1);
+    CHECK_EQ(out_start[v_num], edge_vec.size());
+    return {indptr, indices};
+  }
 
 } // dgl::dev
 

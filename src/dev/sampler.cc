@@ -3,6 +3,7 @@
 //
 
 #include "sampler.h"
+#include "dgl/aten/macro.h"
 
 namespace dgl::dev {
 using namespace runtime;
@@ -102,8 +103,10 @@ DGL_REGISTER_GLOBAL("dev._CAPI_Increment")
     .set_body([](DGLArgs args, DGLRetValue *rv) {
       NDArray count = args[0];
       NDArray row = args[1];
-      ATEN_ID_TYPE_SWITCH(count->dtype, IdType, {
-        Increment<kDGLCUDA, IdType>(count, row);
+      ATEN_ID_TYPE_SWITCH(count->dtype, CounterType, {
+        ATEN_ID_TYPE_SWITCH(row->dtype, IndexType, {
+          Increment<kDGLCUDA, CounterType, IndexType>(count, row);
+        });
       });
     });
 }  // namespace dgl::dev
