@@ -16,6 +16,8 @@ __all__ = [
     "metis_partition",
     "metis_partition_assignment",
     "partition_graph_with_halo",
+    "make_symmetric",
+    "metis_partition_assignment_capi"
 ]
 
 
@@ -274,6 +276,33 @@ def get_peak_mem():
             return int(mem) / 1024 / 1024
     return 0.0
 
+def make_symmetric(g):
+    start = time.time()
+    sym_gidx = _CAPI_DGLMakeSymmetric_Hetero(g._graph)
+    sym_g = DGLGraph(gidx=sym_gidx)
+    print(
+        "Convert a graph into a bidirected graph: {:.3f} seconds, peak memory: {:.3f} GB".format(
+            time.time() - start, get_peak_mem()
+        )
+    )
+    return sym_g
+
+def metis_partition_assignment_capi(sym_g, k, vwgt, mode="k-way", objtype="cut"):
+    start = time.time()
+    vwgt = F.to_dgl_nd(vwgt)
+    node_part = _CAPI_DGLMetisPartition_Hetero(
+        sym_g._graph, k, vwgt, mode, (objtype == "cut")
+    )
+    print(
+        "Metis partitioning: {:.3f} seconds, peak memory: {:.3f} GB".format(
+            time.time() - start, get_peak_mem()
+        )
+    )
+    if len(node_part) == 0:
+        return None
+    else:
+        node_part = utils.toindex(node_part)
+        return node_part.tousertensor()
 
 def metis_partition_assignment(
     g, k, balance_ntypes=None, balance_edges=False, mode="k-way", objtype="cut"
@@ -387,249 +416,6 @@ def metis_partition_assignment(
     )
     print(
         "Metis partitioning: {:.3f} seconds, peak memory: {:.3f} GB".format(
-            time.time() - start, get_peak_mem()
-        )
-    )
-    if len(node_part) == 0:
-        return None
-    else:
-        node_part = utils.toindex(node_part)
-        return node_part.tousertensor()
-
-def metis_partition_assignment_v2(
-    g, k, balance_ntypes=None, wgt=None, mode="recursive", objtype="vol"
-):
-    """This assigns nodes to different partitions with Metis partitioning algorithm.
-
-    When performing Metis partitioning, we can put some constraint on the partitioning.
-    Current, it supports two constrants to balance the partitioning. By default, Metis
-    always tries to balance the number of nodes in each partition.
-
-    * `balance_ntypes` balances the number of nodes of different types in each partition.
-    * `balance_edges` balances the number of edges in each partition.
-
-    To balance the node types, a user needs to pass a vector of N elements to indicate
-    the type of each node. N is the number of nodes in the input graph.
-
-    After the partition assignment, we construct partitions.
-
-    Parameters
-    ----------
-    g : DGLGraph
-        The graph to be partitioned
-    k : int
-        The number of partitions.
-    balance_ntypes : tensor
-        Node type of each node
-    wgt : tensor
-        Indicate whether to balance the edges.
-    mode : str, "k-way" or "recursive"
-        Whether use multilevel recursive bisection or multilevel k-way paritioning.
-    objtype : str, "cut" or "vol"
-        Set the objective as edge-cut minimization or communication volume minimization. This
-        argument is used by the Metis algorithm.
-
-    Returns
-    -------
-    a 1-D tensor
-        A vector with each element that indicates the partition ID of a vertex.
-    """
-    assert mode in (
-        "k-way",
-        "recursive",
-    ), "'mode' can only be 'k-way' or 'recursive'"
-    assert (
-        g.idtype == F.int64
-    ), "IdType of graph is required to be int64 for now."
-    # METIS works only on symmetric graphs.
-    # The METIS runs on the symmetric graph to generate the node assignment to partitions.
-    start = time.time()
-    sym_gidx = _CAPI_DGLMakeSymmetric_Hetero(g._graph)
-    sym_g = DGLGraph(gidx=sym_gidx)
-    print(
-        "Convert a graph into a bidirected graph: {:.3f} seconds, peak memory: {:.3f} GB".format(
-            time.time() - start, get_peak_mem()
-        )
-    )
-    vwgt = []
-    # To balance the node types in each partition, we can take advantage of the vertex weights
-    # in Metis. When vertex weights are provided, Metis will tries to generate partitions with
-    # balanced vertex weights. A vertex can be assigned with multiple weights. The vertex weights
-    # are stored in a vector of N * w elements, where N is the number of vertices and w
-    # is the number of weights per vertex. Metis tries to balance the first weight, and then
-    # the second weight, and so on.
-    # When balancing node types, we use the first weight to indicate the first node type.
-    # if a node belongs to the first node type, its weight is set to 1; otherwise, 0.
-    # Similary, we set the second weight for the second node type and so on. The number
-    # of weights is the same as the number of node types.
-    start = time.time()
-    if balance_ntypes is not None:
-        assert (
-            len(balance_ntypes) == g.num_nodes()
-        ), "The length of balance_ntypes should be equal to #nodes in the graph"
-        balance_ntypes = F.tensor(balance_ntypes)
-        uniq_ntypes = F.unique(balance_ntypes)
-        for ntype in uniq_ntypes:
-            vwgt.append(F.astype(balance_ntypes == ntype, F.int64))
-
-    # When balancing edges in partitions, we use in-degree as one of the weights.
-    if wgt is not None:
-        if balance_ntypes is None:
-            vwgt.append(F.astype(wgt, F.int64))
-        else:
-            for ntype in uniq_ntypes:
-                nids = F.asnumpy(F.nonzero_1d(balance_ntypes == ntype))
-                degs = np.zeros((g.num_nodes(),), np.int64)
-                degs[nids] = F.asnumpy(wgt[nids])
-                vwgt.append(F.zerocopy_from_numpy(degs))
-
-    # The vertex weights have to be stored in a vector.
-    if len(vwgt) > 0:
-        vwgt = F.stack(vwgt, 1)
-        shape = (
-            np.prod(
-                F.shape(vwgt),
-            ),
-        )
-        vwgt = F.reshape(vwgt, shape)
-        vwgt = F.to_dgl_nd(vwgt)
-    else:
-        vwgt = F.zeros((0,), F.int64, F.cpu())
-        vwgt = F.to_dgl_nd(vwgt)
-    print(
-        "Construct multi-constraint weights: {:.3f} seconds, peak memory: {:.3f} GB".format(
-            time.time() - start, get_peak_mem()
-        )
-    )
-
-    start = time.time()
-    node_part = _CAPI_DGLMetisPartition_Hetero(
-        sym_g._graph, k, vwgt, mode, (objtype == "cut")
-    )
-    print(
-        "Metis partitioning: {:.3f} seconds, peak memory: {:.3f} GB".format(
-            time.time() - start, get_peak_mem()
-        )
-    )
-    if len(node_part) == 0:
-        return None
-    else:
-        node_part = utils.toindex(node_part)
-        return node_part.tousertensor()
-    
-
-def metis_partition_assignment_v3(
-    indptr, indices, k, balance_ntypes=None, wgt=None, ewgt=None, mode="k-way", objtype="vol"
-):
-    """This assigns nodes to different partitions with Metis partitioning algorithm.
-
-    When performing Metis partitioning, we can put some constraint on the partitioning.
-    Current, it supports two constrants to balance the partitioning. By default, Metis
-    always tries to balance the number of nodes in each partition.
-
-    * `balance_ntypes` balances the number of nodes of different types in each partition.
-    * `balance_edges` balances the number of edges in each partition.
-
-    To balance the node types, a user needs to pass a vector of N elements to indicate
-    the type of each node. N is the number of nodes in the input graph.
-
-    After the partition assignment, we construct partitions.
-
-    Parameters
-    ----------
-    indptr : NDArray length: |V|
-        The indptr of the graph to be partitioned
-    indices: NDArray length: 2 x |E|
-        The indices of the graph to be partitioned
-    k : int
-        The number of partitions.
-    balance_ntypes : tensor
-        Node type of each node
-    wgt : tensor
-        Weightes used to balance the nodes.
-    ewgt : tensor
-        Weightes used to estimate the edge cut cost.      
-    mode : str, "k-way" or "recursive"
-        Whether use multilevel recursive bisection or multilevel k-way paritioning.
-    objtype : str, "cut" or "vol"
-        Set the objective as edge-cut minimization or communication volume minimization. This
-        argument is used by the Metis algorithm.
-
-    Returns
-    -------
-    a 1-D tensor
-        A vector with each element that indicates the partition ID of a vertex.
-    """
-    assert mode in (
-        "k-way",
-        "recursive",
-    ), "'mode' can only be 'k-way' or 'recursive'"
-
-    # METIS works only on symmetric graphs.
-    # The METIS runs on the symmetric graph to generate the node assignment to partitions.
-    start = time.time()
-    # sym_gidx = _CAPI_DGLMakeSymmetric_Hetero(g._graph)
-    # sym_g = DGLGraph(gidx=sym_gidx)
-    vwgt = []
-    # To balance the node types in each partition, we can take advantage of the vertex weights
-    # in Metis. When vertex weights are provided, Metis will tries to generate partitions with
-    # balanced vertex weights. A vertex can be assigned with multiple weights. The vertex weights
-    # are stored in a vector of N * w elements, where N is the number of vertices and w
-    # is the number of weights per vertex. Metis tries to balance the first weight, and then
-    # the second weight, and so on.
-    # When balancing node types, we use the first weight to indicate the first node type.
-    # if a node belongs to the first node type, its weight is set to 1; otherwise, 0.
-    # Similary, we set the second weight for the second node type and so on. The number
-    # of weights is the same as the number of node types.
-    start = time.time()
-    if balance_ntypes is not None:
-        assert (
-            len(balance_ntypes) == indptr.shape[0] - 1
-        ), "The length of balance_ntypes should be equal to #nodes in the graph"
-        balance_ntypes = F.tensor(balance_ntypes)
-        uniq_ntypes = F.unique(balance_ntypes)
-        for ntype in uniq_ntypes:
-            vwgt.append(F.astype(balance_ntypes == ntype, F.int64))
-
-    # When balancing edges in partitions, we use in-degree as one of the weights.
-    if wgt is not None:
-        if balance_ntypes is None:
-            vwgt.append(F.astype(wgt, F.int64))
-        else:
-            for ntype in uniq_ntypes:
-                nids = F.asnumpy(F.nonzero_1d(balance_ntypes == ntype))
-                degs = np.zeros((indptr.shape[0] - 1,), np.int64)
-                degs[nids] = F.asnumpy(wgt[nids])
-                vwgt.append(F.zerocopy_from_numpy(degs))
-
-    # The vertex weights have to be stored in a vector.
-    if len(vwgt) > 0:
-        vwgt = F.stack(vwgt, 1)
-        shape = (
-            np.prod(
-                F.shape(vwgt),
-            ),
-        )
-        vwgt = F.reshape(vwgt, shape)
-        vwgt = F.to_dgl_nd(vwgt)
-    else:
-        vwgt = F.zeros((0,), F.int64, F.cpu())
-        vwgt = F.to_dgl_nd(vwgt)
-    print(
-        "Construct multi-constraint weights: {:.3f} seconds, peak memory: {:.3f} GB".format(
-            time.time() - start, get_peak_mem()
-        )
-    )
-    start = time.time()
-    ewgt = F.zerocopy_to_dgl_ndarray(ewgt)
-    indptr = F.to_dgl_nd(indptr)
-    indices = F.to_dgl_nd(indices)
-    node_part = _CAPI_DGLMetisPartitionEdge_Hetero(
-        indptr, indices, k, vwgt, ewgt, mode, (objtype == "cut")
-    )
-    
-    print(
-        "Metis partitioning with weighted edges: {:.3f} seconds, peak memory: {:.3f} GB".format(
             time.time() - start, get_peak_mem()
         )
     )
