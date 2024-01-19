@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.18)
 ########################################
 # Borrowed and adapted from TVM project
 ########################################
+set(CMP0146 NEW)
 project(dgl C CXX)
 message(STATUS "Start configuring project ${PROJECT_NAME}")
 
