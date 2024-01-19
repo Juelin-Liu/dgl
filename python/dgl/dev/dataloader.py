@@ -2,8 +2,7 @@ from .util import *
 from dataclasses import dataclass
 from torch.utils.data import DataLoader
 from torch.cuda import device_count
-
-from ..utils import pin_memory_inplace
+from .. import DGLGraph
 @dataclass
 class SampleConfig:
     rank: int = 0
@@ -11,7 +10,7 @@ class SampleConfig:
     batch_size:int = 1024
     replace:bool = False
     mode: str = "uva" # must be one of ["uva", "gpu"]
-    reindex: bool = True
+    reindex: bool = True # wheter to make the sampled vertex to be 0 indexed
     fanouts: list[int] = None
     def header(self):
         return ["rank","world_size", "batch_size", "replace", "mode", "reindex", "fanouts"]
@@ -26,20 +25,21 @@ class SampleConfig:
                 ]
         
 class GraphDataloader:
-    def __init__(self, indptr: Tensor, indices: Tensor, train_idx: Tensor, config: SampleConfig):
+    def __init__(self, g: DGLGraph, train_idx: Tensor, config: SampleConfig):
         assert(config.mode in ["uva", "gpu"])
         assert(config.fanouts is not None)
         assert(config.rank < device_count())
+        assert("csc" in g.formats()["created"])
         self.device = f"cuda:{config.rank}"
         self.idx_loader = DataLoader(train_idx.to(self.device), batch_size=config.batch_size)
         self.iter = iter(self.idx_loader)
         self.config = config
         if config.mode == "uva":
-            self.pinned_indptr_nd = pin_memory_inplace(indptr)
-            self.pinned_indices_nd = pin_memory_inplace(indices)
+            self.g = g.pin_memory_()
         elif config.mode == "gpu":
-            indptr = indptr.to(self.device)
-            indices = indices.to(self.device)
+            self.g = g.to(self.device)
+        
+        indptr, indices, edges = self.g.adj_tensors("csc")
         SetGraph(indptr, indices)
         SetFanout(config.fanouts)
 

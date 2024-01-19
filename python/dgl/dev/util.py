@@ -41,28 +41,13 @@ def GetBlocks(batch_id: int, reindex = True, layers: int = 3) -> (Tensor, Tensor
 def Increment(array: Tensor, row: Tensor):
     return _CAPI_Increment(F.to_dgl_nd(array), F.to_dgl_nd(row))
 
-def COO2CSR(v_num: int, src: Tensor, dst: Tensor, data: Tensor=Tensor([])):
+def COO2CSR(v_num: int, src: Tensor, dst: Tensor, data: Tensor=Tensor([]), to_undirected : bool = True):
     src = F.to_dgl_nd(src)
     dst = F.to_dgl_nd(dst)
     data = F.to_dgl_nd(data)
-    ret = _CAPI_COO2CSR(v_num, src, dst, data)
+    ret = _CAPI_COO2CSR(v_num, src, dst, data, to_undirected)
     
     indptr = F.from_dgl_nd(ret(0))
     indices = F.from_dgl_nd(ret(1))
     data = F.from_dgl_nd(ret(2))
     return (indptr, indices, data)
-
-# this is an inplace function the content in indices will be overwriten
-def CompactCSR(indptr: Tensor, indices: Tensor):
-    indptr = F.to_dgl_nd(indptr)
-    indices = F.to_dgl_nd(indices)
-    ret = _CAPI_CompactCSR(indptr, indices)
-    indptr = F.from_dgl_nd(ret(0))
-    indices = F.from_dgl_nd(ret(1))
-    return (indptr, indices)
-
-def LoadSNAP(in_file: str):
-    ret = _CAPI_LoadSNAP(in_file)
-    indptr = F.from_dgl_nd(ret(0))
-    indices = F.from_dgl_nd(ret(1))
-    return indptr, indices

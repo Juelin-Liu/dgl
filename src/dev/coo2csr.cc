@@ -15,29 +15,39 @@ DGL_REGISTER_GLOBAL("dev._CAPI_COO2CSR")
       NDArray src = args[1];
       NDArray dst = args[2];
       NDArray in_data = args[3];
+      bool to_undirected = args[4];
       CHECK_EQ(dst.NumElements(), src.NumElements());
       if (in_data.NumElements() != 0) {
         CHECK_EQ(in_data.NumElements(), src.NumElements());
-        const auto [indptr, indices, data] = COO2CSR(v_num, src, dst, in_data);
+        const auto [indptr, indices, data] = COO2CSR(v_num, src, dst, in_data, to_undirected);
         *rv=ConvertNDArrayVectorToPackedFunc({indptr, indices, data});
       } else {
-        const auto [indptr, indices] = COO2CSR(v_num, src, dst);
+        const auto [indptr, indices] = COO2CSR(v_num, src, dst, to_undirected);
         *rv=ConvertNDArrayVectorToPackedFunc({indptr, indices, in_data});
       }
+    });
+
+    DGL_REGISTER_GLOBAL("dev._CAPI_ReindexCSR")
+    .set_body([](DGLArgs args, DGLRetValue *rv) {
+      NDArray in_indptr = args[0];
+      NDArray in_indices = args[1];
+      const auto [out_indptr, out_indices] = ReindexCSR(in_indptr, in_indices);
+      *rv=ConvertNDArrayVectorToPackedFunc({out_indptr, out_indices});
     });
 
     DGL_REGISTER_GLOBAL("dev._CAPI_CompactCSR")
     .set_body([](DGLArgs args, DGLRetValue *rv) {
       NDArray in_indptr = args[0];
-      NDArray in_indices = args[1];
-      const auto [out_indptr, out_indices] = CompactCSR(in_indptr, in_indices);
-      *rv=ConvertNDArrayVectorToPackedFunc({out_indptr, out_indices});
+      NDArray in_indices_flag = args[1];
+      const auto out_indptr = CompactCSR(in_indptr, in_indices_flag);
+      *rv=out_indptr;
     });
 
     DGL_REGISTER_GLOBAL("dev._CAPI_LoadSNAP")
     .set_body([](DGLArgs args, DGLRetValue *rv) {
       std::string in_file = args[0];
-      const auto [out_indptr, out_indices] = LoadSNAP(in_file);
+      bool to_sym = args[1];
+      const auto [out_indptr, out_indices] = LoadSNAP(in_file, to_sym);
       *rv=ConvertNDArrayVectorToPackedFunc({out_indptr, out_indices});
     });
 }
