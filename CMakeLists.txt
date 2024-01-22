@@ -2,7 +2,6 @@ cmake_minimum_required(VERSION 3.18)
 ########################################
 # Borrowed and adapted from TVM project
 ########################################
-set(CMP0146 NEW)
 project(dgl C CXX)
 message(STATUS "Start configuring project ${PROJECT_NAME}")
 
@@ -76,7 +75,7 @@ dgl_feature_option(
 dgl_feature_option(
     BUILD_GRAPHBOLT
     "Build Graphbolt library"
-    "dev" "dogfood"
+    "none"
 )
 
 dgl_feature_option(
