@@ -26,7 +26,7 @@ def bench_quiver_batch(configs: list[Config]):
 
     csr_topo = quiver.CSRTopo(indptr=indptr, indices=indices)    
     cache_policy = "p2p_clique_replicate" if config.nvlink else "device_replicate"
-    device_cache_size = "0GB" # TODO: dynamically determine cache size
+    device_cache_size = config.cache_size # TODO: dynamically determine cache size
     sampling_mode = "UVA"
     quiver_feat = quiver.Feature(rank=0, device_list=device_list, device_cache_size=device_cache_size, cache_policy=cache_policy, csr_topo=csr_topo)
     quiver_feat.from_cpu_tensor(feat)

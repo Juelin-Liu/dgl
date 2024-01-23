@@ -281,9 +281,25 @@ def load_topo(config: Config, is_pinned=False):
 def get_feat_dim(config: Config):
     if config.graph_name == "orkut":
         return 1280
+    elif config.graph_name == "friendster":
+        return 256
+    elif config.graph_name == "papers100M":
+        return 128
     else:
         return 128
-    
+
+def get_feat_bytes(feat:torch.Tensor):
+    res = feat.element_size()
+    for dim in feat.shape:
+        res *= dim
+        
+    return res        
+
+def get_feat_bytes_str(feat:torch.Tensor):
+    feat_bytes = get_feat_bytes(feat)
+    num_gb = round(feat_bytes / 1024 / 1024 / 1024)
+    return f"{num_gb}GB"
+
 def load_data(config: Config, is_pinned=False):
     print("Start data loading")
     t1 = Timer()
