@@ -58,17 +58,21 @@ def bench_p3_batch(configs: list[Config]):
         assert("p3" in config.system)
         assert(config.graph_name == configs[0].graph_name)
         assert(config.model == configs[0].model)
-        assert(config.cache_size in [0, 1])
         
     graph, train_idx, valid_idx, test_idx = load_topo(configs[0])
-    if config.graph_name in ["products", "papers100M"]:
-        feat, label, num_label = load_feat_label(os.path.join(config.data_dir, config.graph_name))
-    else:
-        v_num = graph.num_nodes()
-        feat = None
-        num_label = 10
-        label = gen_rand_label(v_num, 10)
-    
+    # if config.graph_name in ["products", "papers100M"]:
+    #     feat, label, num_label = load_feat_label(os.path.join(config.data_dir, config.graph_name))
+    # else:
+    #     v_num = graph.num_nodes()
+    #     feat = None
+    #     num_label = 10
+    #     label = gen_rand_label(v_num, 10)
+
+    v_num = graph.num_nodes()
+    feat = None
+    num_label = 10
+    label = gen_rand_label(v_num, 10)
+        
     for config in configs:
         config.num_classes = num_label
         try:
@@ -92,27 +96,19 @@ def train_p3_ddp(rank: int, config: Config, graph: dgl.DGLGraph, global_feat: to
         print(config)
         
     if global_feat is not None:
-        feat = get_p3_local_feat(rank, config.world_size, global_feat)
+        feat = get_p3_local_feat(rank, config.world_size, global_feat).clone()
     else:
-        hid_size = -1
-        if config.graph_name == "friendster":
-            hid_size = 256 // config.world_size
-        elif config.graph_name == "orkut":
-            hid_size = 1024 // config.world_size
-        feat = gen_rand_feat(v_num=graph.num_nodes(), hid_size=hid_size)
-        assert(hid_size != -1)
+        feat_dim = get_feat_dim(config) // config.world_size
+        feat = gen_rand_feat(v_num=graph.num_nodes(), feat_dim=feat_dim)
+
     config.in_feat = feat.shape[1]    
+    assert(config.in_feat > 0)
+
+    feat_handle  = pin_memory_inplace(feat)
+    label_handle = pin_memory_inplace(label)
+    graph = graph.pin_memory_()    
     mode = "uva"
-    if config.cache_size == 0:
-        feat_handle  = pin_memory_inplace(feat)
-        label_handle = pin_memory_inplace(label)
-        graph = graph.pin_memory_()    
-        mode = "uva"
-    elif config.cache_size == 1:
-        feat = feat.to(device)
-        label = label.to(device)
-        graph = graph.to(device)    
-        mode = "gpu"
+
         
     sample_config = SampleConfig(rank=rank, world_size=config.world_size, mode=mode, fanouts=config.fanouts)
     dataloader = GraphDataloader(graph, train_idx, sample_config)
@@ -159,23 +155,13 @@ def train_p3_ddp(rank: int, config: Config, graph: dgl.DGLGraph, global_feat: to
         handle1 = dist.all_gather(tensor_list=input_node_buffer_lst, tensor=input_nodes, async_op=True)
         handle2 = dist.all_gather(tensor_list=src_edge_buffer_lst, tensor=src, async_op=True)
         handle3 = dist.all_gather(tensor_list=dst_edge_buffer_lst, tensor=dst, async_op=True)
+        batch_label = gather_pinned_tensor_rows(label, output_nodes)
 
-        batch_label = None
-        if config.cache_size == 0:
-            batch_label = gather_pinned_tensor_rows(label, output_nodes)
-        if config.cache_size == 1:
-            batch_label = label[output_nodes]
             
         handle1.wait()
         for r, _input_nodes in enumerate(input_node_buffer_lst):
-            if config.cache_size == 1:
-                input_feat_buffer_lst[r] = feat[_input_nodes]
-            elif config.cache_size == 0:
-                input_feat_buffer_lst[r] = gather_pinned_tensor_rows(feat, _input_nodes)
-            else: # 'caching'
-                print("Current p3 implementation does not support caching")
-                exit(-1)
-                
+            input_feat_buffer_lst[r] = gather_pinned_tensor_rows(feat, _input_nodes)
+
         handle2.wait()
         handle3.wait()
         # print(f"{rank=} {epoch=} {iter_idx=} input_feat_shapes={[x.shape for x in input_feat_buffer_lst]} start computing first hidden layer")
@@ -262,21 +248,13 @@ def train_p3_ddp(rank: int, config: Config, graph: dgl.DGLGraph, global_feat: to
             handle2 = dist.all_gather(tensor_list=src_edge_buffer_lst, tensor=src, async_op=True)
             handle3 = dist.all_gather(tensor_list=dst_edge_buffer_lst, tensor=dst, async_op=True)
 
-            batch_label = None
-            if config.cache_size == 0:
-                batch_label = gather_pinned_tensor_rows(label, output_nodes)
-            if config.cache_size == 1:
-                batch_label = label[output_nodes]
+            batch_label = gather_pinned_tensor_rows(label, output_nodes)
+
                 
             handle1.wait()
             for r, _input_nodes in enumerate(input_node_buffer_lst):
-                if config.cache_size == 1:
-                    input_feat_buffer_lst[r] = feat[_input_nodes]
-                elif config.cache_size == 0:
-                    input_feat_buffer_lst[r] = gather_pinned_tensor_rows(feat, _input_nodes)
-                else: # 'caching'
-                    print("Current p3 implementation does not support caching")
-                    exit(-1)
+                input_feat_buffer_lst[r] = gather_pinned_tensor_rows(feat, _input_nodes)
+
                     
             handle2.wait()
             handle3.wait()
@@ -382,21 +360,12 @@ def train_p3_ddp(rank: int, config: Config, graph: dgl.DGLGraph, global_feat: to
                 handle2 = dist.all_gather(tensor_list=src_edge_buffer_lst, tensor=src, async_op=True)
                 handle3 = dist.all_gather(tensor_list=dst_edge_buffer_lst, tensor=dst, async_op=True)
 
-                batch_label = None
-                if config.cache_size == 0:
-                    batch_label = gather_pinned_tensor_rows(label, output_nodes)
-                if config.cache_size == 1:
-                    batch_label = label[output_nodes]
+                batch_label = gather_pinned_tensor_rows(label, output_nodes)
                     
                 handle1.wait()
                 for r, _input_nodes in enumerate(input_node_buffer_lst):
-                    if config.cache_size == 1:
-                        input_feat_buffer_lst[r] = feat[_input_nodes]
-                    elif config.cache_size == 0:
-                        input_feat_buffer_lst[r] = gather_pinned_tensor_rows(feat, _input_nodes)
-                    else: # 'caching'
-                        print("Current p3 implementation does not support caching")
-                        exit(-1)
+                    input_feat_buffer_lst[r] = gather_pinned_tensor_rows(feat, _input_nodes)
+
                         
                 handle2.wait()
                 handle3.wait()

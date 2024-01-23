@@ -258,8 +258,8 @@ def load_feat_label(in_dir) -> (torch.Tensor, torch.Tensor, int):
     num_labels = torch.unique(label).shape[0]
     return feat, label, num_labels
 
-def gen_rand_feat(v_num, hid_size):
-    return torch.empty((v_num, hid_size))
+def gen_rand_feat(v_num, feat_dim):
+    return torch.empty((v_num, feat_dim))
 
 def gen_rand_label(v_num, num_classes):
     return torch.randint(low=0, high=num_classes, size=(v_num,))
@@ -278,6 +278,12 @@ def load_topo(config: Config, is_pinned=False):
         
     return graph, train_idx, valid_idx, test_idx
 
+def get_feat_dim(config: Config):
+    if config.graph_name == "orkut":
+        return 1280
+    else:
+        return 128
+    
 def load_data(config: Config, is_pinned=False):
     print("Start data loading")
     t1 = Timer()
@@ -290,18 +296,31 @@ def load_data(config: Config, is_pinned=False):
     feat = None
     label = None
     num_label = None
-    if config.graph_name in ["products", "papers100M"]:
-        feat, label, num_label = load_feat_label(in_dir)
-    elif config.graph_name == "friendster":
-        v_num = graph.num_nodes()
-        num_label = 10
-        feat = gen_rand_feat(v_num, 256)
-        label = gen_rand_label(v_num, num_label)
-    elif config.graph_name == "orkut":
-        v_num = graph.num_nodes()
-        num_label = 10
-        feat = gen_rand_feat(v_num, 1024)
-        label = gen_rand_label(v_num, num_label)
+    # if config.graph_name in ["products", "papers100M"]:
+    #     feat, label, num_label = load_feat_label(os.path.join(config.data_dir, config.graph_name))
+    # else:
+    #     v_num = graph.num_nodes()
+    #     feat = None
+    #     num_label = 10
+    #     label = gen_rand_label(v_num, 10)
+    feat_dim = get_feat_dim(config)
+    v_num = graph.num_nodes()
+    num_label = 10
+    feat = gen_rand_feat(v_num, feat_dim)
+    label = gen_rand_label(v_num, num_label)
+    
+    # if config.graph_name in ["products", "papers100M"]:
+    #     feat, label, num_label = load_feat_label(in_dir)
+    # elif config.graph_name == "friendster":
+    #     v_num = graph.num_nodes()
+    #     num_label = 10
+    #     feat = gen_rand_feat(v_num, 128)
+    #     label = gen_rand_label(v_num, num_label)
+    # elif config.graph_name == "orkut":
+    #     v_num = graph.num_nodes()
+    #     num_label = 10
+    #     feat = gen_rand_feat(v_num, 1024)
+    #     label = gen_rand_label(v_num, num_label)
     print(f"Data loading total time {t1.duration()} secs")
     
     if is_pinned:

@@ -70,8 +70,8 @@ def prep_ogbn_graph(in_dir, out_dir, graph_name):
     node_labels: torch.Tensor = node_labels.type(torch.int64)
     torch.save(node_labels, os.path.join(out_dir, "label.pt"))
 
-def gen_rand_feat(v_num, hid_size):
-    return torch.empty((v_num, hid_size))
+def gen_rand_feat(v_num, feat_dim):
+    return torch.empty((v_num, feat_dim))
 
 def gen_rand_label(v_num, num_classes):
     return torch.randint(low=0, high=num_classes, size=(v_num,))

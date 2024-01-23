@@ -13,7 +13,6 @@ def bench_dgl_batch(configs: list[Config]):
         assert("dgl" in config.system)
         assert(config.graph_name == configs[0].graph_name)
         assert(config.model == configs[0].model)
-        assert(config.cache_size in [0, 1])
         
     graph, feat, label, train_idx, valid_idx, test_idx, num_label = load_data(configs[0])
     for config in configs:
@@ -38,16 +37,9 @@ def train_dgl_ddp(rank: int, config: Config, graph: dgl.DGLGraph, feat: torch.Te
     if rank == 0:
         print(config)
     mode = "uva"
-    if config.cache_size == 0:
-        feat_handle  = pin_memory_inplace(feat)
-        label_handle = pin_memory_inplace(label)
-        graph = graph.pin_memory_()    
-        mode = "uva"
-    elif config.cache_size == 1:
-        feat = feat.to(device)
-        label = label.to(device)
-        graph = graph.to(device)    
-        mode = "gpu"
+    feat_handle  = pin_memory_inplace(feat)
+    label_handle = pin_memory_inplace(label)
+    graph = graph.pin_memory_()    
     sample_config = SampleConfig(rank=rank, world_size=config.world_size, mode=mode, fanouts=config.fanouts)
     dataloader = GraphDataloader(graph, train_idx, sample_config)
 
@@ -64,14 +56,8 @@ def train_dgl_ddp(rank: int, config: Config, graph: dgl.DGLGraph, feat: torch.Te
     step = 0
     for input_nodes, output_nodes, blocks in dataloader:
         step += 1
-        batch_feat = None
-        batch_label = None
-        if config.cache_size == 0:
-            batch_feat = gather_pinned_tensor_rows(feat, input_nodes)
-            batch_label = gather_pinned_tensor_rows(label, output_nodes)
-        elif config.cache_size == 1:
-            batch_feat = feat[input_nodes]
-            batch_label = label[output_nodes]
+        batch_feat = gather_pinned_tensor_rows(feat, input_nodes)
+        batch_label = gather_pinned_tensor_rows(label, output_nodes)
         batch_pred = model(blocks, batch_feat)
         batch_loss = torch.nn.functional.cross_entropy(batch_pred, batch_label)
         optimizer.zero_grad()
@@ -99,14 +85,8 @@ def train_dgl_ddp(rank: int, config: Config, graph: dgl.DGLGraph, feat: torch.Te
             step += 1
             sampling_timer.end()
             feat_timer = CudaTimer()
-            batch_feat = None
-            batch_label = None
-            if  config.cache_size == 0:
-                batch_feat = gather_pinned_tensor_rows(feat, input_nodes)
-                batch_label = gather_pinned_tensor_rows(label, output_nodes)
-            elif config.cache_size == 1:
-                batch_feat = feat[input_nodes]
-                batch_label = label[output_nodes]
+            batch_feat = gather_pinned_tensor_rows(feat, input_nodes)
+            batch_label = gather_pinned_tensor_rows(label, output_nodes)
             # dist.barrier()
             feat_timer.end()            
             
@@ -153,14 +133,10 @@ def train_dgl_ddp(rank: int, config: Config, graph: dgl.DGLGraph, feat: torch.Te
         dataloader = GraphDataloader(graph, test_idx, sample_config)
         for input_nodes, output_nodes, blocks in dataloader:
             with torch.no_grad():
-                batch_feat = None
-                batch_label = None
-                if config.cache_size == 0:
-                    batch_feat = gather_pinned_tensor_rows(feat, input_nodes)
-                    batch_label = gather_pinned_tensor_rows(label, output_nodes)
-                elif config.cache_size == 1:
-                    batch_feat = feat[input_nodes]
-                    batch_label = label[output_nodes]
+
+                batch_feat = gather_pinned_tensor_rows(feat, input_nodes)
+                batch_label = gather_pinned_tensor_rows(label, output_nodes)
+
                 ys.append(batch_label)
                 batch_pred = model(blocks, batch_feat)
                 y_hats.append(batch_pred)  
