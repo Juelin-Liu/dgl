@@ -49,6 +49,10 @@ class QuiverDglSageSample():
         self.idx_loader = DataLoader(self.target_idx, batch_size=self.batch_size)
         self.iter = iter(self.idx_loader)
         self.sampler = QuiverGraphSageSampler(sampler)
+    
+    def reset(self):
+        self.idx_loader = DataLoader(self.target_idx, batch_size=self.batch_size)
+        self.iter = iter(self.idx_loader)
         
     def __iter__(self):
         self.iter = iter(self.idx_loader)

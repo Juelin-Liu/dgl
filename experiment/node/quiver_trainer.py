@@ -26,7 +26,7 @@ def bench_quiver_batch(configs: list[Config]):
 
     csr_topo = quiver.CSRTopo(indptr=indptr, indices=indices)    
     cache_policy = "p2p_clique_replicate" if config.nvlink else "device_replicate"
-    device_cache_size = "4GB" # TODO: dynamically determine cache size
+    device_cache_size = "0GB" # TODO: dynamically determine cache size
     sampling_mode = "UVA"
     quiver_feat = quiver.Feature(rank=0, device_list=device_list, device_cache_size=device_cache_size, cache_policy=cache_policy, csr_topo=csr_topo)
     quiver_feat.from_cpu_tensor(feat)
@@ -67,22 +67,23 @@ def train_quiver_ddp(rank: int, config: Config, quiver_sampler: quiver.pyg.Graph
     model = DDP(model, device_ids=[rank])
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     
-    # print(f"pre-heating model on device: {device}")
-    # for input_nodes, output_nodes, blocks in dataloader:
-    #     batch_feat = None
-    #     batch_label = None
-    #     if config.cache_size == 0:
-    #         batch_feat = gather_pinned_tensor_rows(feat, input_nodes)
-    #         batch_label = gather_pinned_tensor_rows(label, output_nodes)
-    #     if config.cache_size == 1:
-    #         batch_feat = feat[input_nodes]
-    #         batch_label = label[output_nodes]
-    #     batch_pred = model(blocks, batch_feat)
-    #     batch_loss = torch.nn.functional.cross_entropy(batch_pred, batch_label)
-    #     optimizer.zero_grad()
-    #     batch_loss.backward()
-    #     optimizer.step()
-
+    print(f"pre-heating model on device: {device}")
+    label = label.to(device)
+    
+    step = 0
+    for input_nodes, output_nodes, blocks in dataloader:
+        step += 1
+        batch_feat = feat[input_nodes]
+        batch_label = label[output_nodes]
+        batch_pred = model(blocks, batch_feat)
+        batch_loss = torch.nn.functional.cross_entropy(batch_pred, batch_label)
+        optimizer.zero_grad()
+        batch_loss.backward()
+        optimizer.step()
+        if step > PREHEAT_STEP:
+            dataloader.reset()
+            break
+    dist.barrier()
     print(f"training model on device: {device}")        
     timer = Timer()
     sampling_timers = []
@@ -92,7 +93,6 @@ def train_quiver_ddp(rank: int, config: Config, quiver_sampler: quiver.pyg.Graph
     edges_computed = []
     step_per_epoch = dataloader.target_idx.shape[0] // dataloader.batch_size + 1
     step = 0
-    label = label.to(device)
     for epoch in range(config.num_epoch):
         edges_computed_epoch = 0
         sampling_timer = CudaTimer()
@@ -128,7 +128,7 @@ def train_quiver_ddp(rank: int, config: Config, quiver_sampler: quiver.pyg.Graph
 
             sampling_timer = CudaTimer()
             
-            log_step(rank, epoch, step, step_per_epoch, e2eTimer)
+            log_step(rank, epoch, step, step_per_epoch, timer)
                 
         edges_computed.append(edges_computed_epoch)
     torch.cuda.synchronize()
@@ -142,7 +142,7 @@ def train_quiver_ddp(rank: int, config: Config, quiver_sampler: quiver.pyg.Graph
     
     dist.barrier()
     
-    if config.test_acc:
+    if config.test_model_acc:
         t2 = Timer()
         print(f"testing model accuracy on {device}")
         model.eval()

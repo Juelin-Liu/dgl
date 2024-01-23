@@ -16,7 +16,7 @@ include(cmake/util/FindCUDA.cmake)
 # Options for building DGL.
 # NOTE: Please avoid editing this file to change build type. Instead, using
 # bash script/build_dgl.sh -e -t release to overwrite the value.
-dgl_option(BUILD_TYPE "Type of the build: dev, dogfood or release" "dev")
+dgl_option(BUILD_TYPE "Type of the build: dev, dogfood or release" "release")
 message(STATUS "Build for ${BUILD_TYPE}")
 
 dgl_option(USE_CUDA "Build with CUDA" ON)

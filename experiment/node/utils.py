@@ -7,6 +7,8 @@ import pandas as pd
 import torch.distributed as dist
 from dgl.utils import pin_memory_inplace, gather_pinned_tensor_rows
 
+PREHEAT_STEP=100
+
 def ddp_setup(rank, world_size):
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "12355"
@@ -82,7 +84,7 @@ class Config:
         self.in_feat = -1
         self.num_classes = -1
         self.partition_type = "edge_balanced"
-        self.test_acc = False
+        self.test_model_acc = False
         
     def get_file_name(self):
         if "groot" not in self.system:
@@ -98,7 +100,9 @@ class Config:
                     "model", "hid_size", "cache_size", "partition_type"]
     
     def content(self):
-        return [pd.Timestamp('now'), self.machine_name, self.graph_name, self.world_size, self.num_epoch, self.fanouts, self.num_redundant_layer, \
+        connection = "_nvlink" if self.nvlink else "_pcie"
+        machine_name = self.machine_name + connection
+        return [pd.Timestamp('now'), machine_name, self.graph_name, self.world_size, self.num_epoch, self.fanouts, self.num_redundant_layer, \
                     self.batch_size, self.system, self.model, self.hid_size, self.cache_size, self.partition_type]
 
     def __repr__(self):
@@ -223,8 +227,8 @@ def write_to_csv(out_path, configs: list[Config], profilers: list[Profiler]):
 
 def load_graph(in_dir, is32=False, wsloop=False, is_sym=False) -> (torch.Tensor, torch.Tensor, torch.Tensor):
     symtype_str = "sym" if is_sym else "xsym"
-    indptr = torch.load(os.path.join(in_dir, f"indptr_64_{symtype_str}.pt"))
-    indices = torch.load(os.path.join(in_dir, f"indices_64_{symtype_str}.pt"))
+    indptr = torch.load(os.path.join(in_dir, f"indptr_{symtype_str}.pt"))
+    indices = torch.load(os.path.join(in_dir, f"indices_{symtype_str}.pt"))
     edges = torch.empty(0, dtype=indices.dtype)
     if wsloop and is_sym == False:
         graph: dgl.DGLGraph = dgl.graph(("csc", (indptr, indices, edges)))
@@ -240,9 +244,9 @@ def load_dgl_graph(in_dir, is32=False, wsloop=False, is_sym=False)->dgl.DGLGraph
     return dgl.graph(("csc", (indptr, indices, edges)))
 
 def load_idx_split(in_dir, is32=False) -> (torch.Tensor, torch.Tensor, torch.Tensor):
-    train_idx = torch.load(os.path.join(in_dir, f"train_idx_64.pt"))
-    valid_idx = torch.load(os.path.join(in_dir, f"valid_idx_64.pt"))
-    test_idx = torch.load(os.path.join(in_dir, f"test_idx_64.pt"))
+    train_idx = torch.load(os.path.join(in_dir, f"train_idx.pt"))
+    valid_idx = torch.load(os.path.join(in_dir, f"valid_idx.pt"))
+    test_idx = torch.load(os.path.join(in_dir, f"test_idx.pt"))
     if is32:
         return train_idx.type(torch.int32), valid_idx.type(torch.int32), test_idx.type(torch.int32)
     else:

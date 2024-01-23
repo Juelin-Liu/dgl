@@ -60,6 +60,29 @@ def train_dgl_ddp(rank: int, config: Config, graph: dgl.DGLGraph, feat: torch.Te
     model = DDP(model, device_ids=[rank])
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     
+    print(f"preheating trainer on device: {device}")
+    step = 0
+    for input_nodes, output_nodes, blocks in dataloader:
+        step += 1
+        batch_feat = None
+        batch_label = None
+        if config.cache_size == 0:
+            batch_feat = gather_pinned_tensor_rows(feat, input_nodes)
+            batch_label = gather_pinned_tensor_rows(label, output_nodes)
+        elif config.cache_size == 1:
+            batch_feat = feat[input_nodes]
+            batch_label = label[output_nodes]
+        batch_pred = model(blocks, batch_feat)
+        batch_loss = torch.nn.functional.cross_entropy(batch_pred, batch_label)
+        optimizer.zero_grad()
+        batch_loss.backward()
+        optimizer.step()
+        if step > PREHEAT_STEP:
+            dataloader.reset()
+            break
+        
+    dist.barrier()
+    
     print(f"training model on device: {device}")        
     timer = Timer()
     sampling_timers = []
@@ -75,7 +98,6 @@ def train_dgl_ddp(rank: int, config: Config, graph: dgl.DGLGraph, feat: torch.Te
         for input_nodes, output_nodes, blocks in dataloader:
             step += 1
             sampling_timer.end()
-            
             feat_timer = CudaTimer()
             batch_feat = None
             batch_label = None
@@ -85,7 +107,7 @@ def train_dgl_ddp(rank: int, config: Config, graph: dgl.DGLGraph, feat: torch.Te
             elif config.cache_size == 1:
                 batch_feat = feat[input_nodes]
                 batch_label = label[output_nodes]
-            dist.barrier()
+            # dist.barrier()
             feat_timer.end()            
             
             forward_timer = CudaTimer()
@@ -108,7 +130,7 @@ def train_dgl_ddp(rank: int, config: Config, graph: dgl.DGLGraph, feat: torch.Te
             forward_timers.append(forward_timer)
             backward_timers.append(backward_timer)
             sampling_timer = CudaTimer()
-            log_step(rank, epoch, step, step_per_epoch, e2eTimer)
+            log_step(rank, epoch, step, step_per_epoch, timer)
 
         edges_computed.append(edges_computed_epoch)
     torch.cuda.synchronize()
@@ -122,7 +144,7 @@ def train_dgl_ddp(rank: int, config: Config, graph: dgl.DGLGraph, feat: torch.Te
     
     dist.barrier()
     
-    if config.test_acc:
+    if config.test_model_acc:
         t2 = Timer()
         print(f"testing model accuracy on {device}")
         model.eval()

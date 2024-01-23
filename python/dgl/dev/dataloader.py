@@ -39,7 +39,7 @@ class GraphDataloader:
         self.batch_size = config.batch_size // config.world_size
                 
         self.global_target_idx = target_idx
-        self.target_idx = target_idx[config.rank*self.loc_idx_size:(config.rank+1) * self.loc_idx_size].clone()
+        self.target_idx = target_idx[config.rank*self.loc_idx_size:(config.rank+1) * self.loc_idx_size].clone().to(self.device)
         self.idx_loader = DataLoader(self.target_idx.to(self.device), batch_size=self.batch_size)
         self.iter = iter(self.idx_loader)
         self.config = config
@@ -56,7 +56,11 @@ class GraphDataloader:
     def set_fanout(self, fanouts):
         self.fanouts = fanouts
         SetFanout(fanouts)
-        
+    
+    def reset(self):
+        self.idx_loader = DataLoader(self.target_idx, batch_size=self.batch_size)
+        self.iter = iter(self.idx_loader)
+    
     def __iter__(self):
         self.iter = iter(self.idx_loader)
         return self
