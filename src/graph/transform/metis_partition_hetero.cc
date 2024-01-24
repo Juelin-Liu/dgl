@@ -10,6 +10,7 @@
 
 #include "../heterograph.h"
 #include "../unit_graph.h"
+#include "dmlc/logging.h"
 
 using namespace dgl::runtime;
 
@@ -21,7 +22,7 @@ namespace transform {
 
 IdArray MetisPartition(
     UnitGraphPtr g, int k, NDArray vwgt_arr, const std::string &mode,
-    bool obj_cut) {
+    bool obj_cut, bool use_edge_weight) {
   // Mode can only be "k-way" or "recursive"
   CHECK(mode == "k-way" || mode == "recursive")
       << "mode can only be \"k-way\" or \"recursive\"";
@@ -37,7 +38,9 @@ IdArray MetisPartition(
   idx_t *xadj = static_cast<idx_t *>(mat.indptr->data);
   idx_t *adjncy = static_cast<idx_t *>(mat.indices->data);
   idx_t *ewgt = nullptr;
-  if (mat.data.NumElements() == mat.indices.NumElements()) {
+  if (use_edge_weight)
+  {
+    CHECK_EQ(mat.data.NumElements(), mat.indices.NumElements());
     ewgt = static_cast<idx_t *>(mat.data->data);
     LOG(INFO) << "using edge weights";
   }
@@ -128,8 +131,13 @@ DGL_REGISTER_GLOBAL("partition._CAPI_DGLMetisPartition_Hetero")
       NDArray vwgt = args[2];
       std::string mode = args[3];
       bool obj_cut = args[4];
+      bool use_edge_weight = false; 
+      try {
+        use_edge_weight = args[5];
+      } catch (...) {}
+       
 #if !defined(_WIN32)
-      *rv = MetisPartition(ugptr, k, vwgt, mode, obj_cut);
+      *rv = MetisPartition(ugptr, k, vwgt, mode, obj_cut, use_edge_weight);
 #else
       LOG(FATAL) << "Metis partition does not support Windows.";
 #endif  // !defined(_WIN32)

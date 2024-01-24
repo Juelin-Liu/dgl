@@ -105,7 +105,7 @@ def train_p3_ddp(rank: int, config: Config, graph: dgl.DGLGraph, global_feat: to
     mode = "uva"
 
         
-    sample_config = SampleConfig(rank=rank, world_size=config.world_size, mode=mode, fanouts=config.fanouts)
+    sample_config = SampleConfig(rank=rank, batch_size=config.batch_size, world_size=config.world_size, mode=mode, fanouts=config.fanouts)
     dataloader = GraphDataloader(graph, train_idx, sample_config)
     
     local_model, global_model = get_p3_model(config)

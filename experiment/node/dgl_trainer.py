@@ -40,7 +40,7 @@ def train_dgl_ddp(rank: int, config: Config, graph: dgl.DGLGraph, feat: torch.Te
     feat_handle  = pin_memory_inplace(feat)
     label_handle = pin_memory_inplace(label)
     graph = graph.pin_memory_()    
-    sample_config = SampleConfig(rank=rank, world_size=config.world_size, mode=mode, fanouts=config.fanouts)
+    sample_config = SampleConfig(rank=rank, batch_size=config.batch_size, world_size=config.world_size, mode=mode, fanouts=config.fanouts)
     dataloader = GraphDataloader(graph, train_idx, sample_config)
 
     model = None

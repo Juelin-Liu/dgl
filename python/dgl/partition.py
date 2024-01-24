@@ -287,11 +287,11 @@ def make_symmetric(g):
     )
     return sym_g
 
-def metis_partition_assignment_capi(sym_g, k, vwgt, mode="k-way", objtype="cut"):
+def metis_partition_assignment_capi(sym_g, k, vwgt, mode="k-way", objtype="cut", use_edge_weight=False):
     start = time.time()
     vwgt = F.to_dgl_nd(vwgt)
     node_part = _CAPI_DGLMetisPartition_Hetero(
-        sym_g._graph, k, vwgt, mode, (objtype == "cut")
+        sym_g._graph, k, vwgt, mode, (objtype == "cut"), use_edge_weight
     )
     print(
         "Metis partitioning: {:.3f} seconds, peak memory: {:.3f} GB".format(

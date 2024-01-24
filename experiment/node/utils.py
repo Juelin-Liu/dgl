@@ -225,11 +225,13 @@ def write_to_csv(out_path, configs: list[Config], profilers: list[Profiler]):
             writer.writerow(row)
     print("Experiment result has been written to: ", out_path)
 
-def load_graph(in_dir, is32=False, wsloop=False, is_sym=False) -> (torch.Tensor, torch.Tensor, torch.Tensor):
+def load_graph(in_dir, is32=False, wsloop=False, is_sym=False, load_edge_weight=False) -> (torch.Tensor, torch.Tensor, torch.Tensor):
     symtype_str = "sym" if is_sym else "xsym"
     indptr = torch.load(os.path.join(in_dir, f"indptr_{symtype_str}.pt"))
     indices = torch.load(os.path.join(in_dir, f"indices_{symtype_str}.pt"))
     edges = torch.empty(0, dtype=indices.dtype)
+    if load_edge_weight:
+        edges = torch.load(os.path.join(in_dir, "edge_weight.pt")).type(torch.int64)
     if wsloop and is_sym == False:
         graph: dgl.DGLGraph = dgl.graph(("csc", (indptr, indices, edges)))
         graph = dgl.add_self_loop(graph)
@@ -239,15 +241,15 @@ def load_graph(in_dir, is32=False, wsloop=False, is_sym=False) -> (torch.Tensor,
     else:
         return indptr, indices, edges
 
-def load_dgl_graph(in_dir, is32=False, wsloop=False, is_sym=False)->dgl.DGLGraph:
-    indptr, indices, edges = load_graph(in_dir, is32, wsloop, is_sym)
+def load_dgl_graph(in_dir, is32=False, wsloop=False, is_sym=False, load_edge_weight=False)->dgl.DGLGraph:
+    indptr, indices, edges = load_graph(in_dir, is32, wsloop, is_sym, load_edge_weight)
     return dgl.graph(("csc", (indptr, indices, edges)))
 
 def load_idx_split(in_dir, is32=False) -> (torch.Tensor, torch.Tensor, torch.Tensor):
-    graph_name = in_dir.split("/")[-1]
-    if graph_name in ["orkut", "friendster"]:
-        data_dir = "/data/juelin/project/scratch/dgl/experiment/dataset"
-        in_dir = os.path.join(data_dir, graph_name)
+    # graph_name = in_dir.split("/")[-1]
+    # if graph_name in ["orkut", "friendster"]:
+    #     data_dir = "/data/juelin/project/scratch/dgl/experiment/dataset"
+    #     in_dir = os.path.join(data_dir, graph_name)
     
     print("load idx split from", in_dir)
     train_idx = torch.load(os.path.join(in_dir, f"train_idx.pt"))
