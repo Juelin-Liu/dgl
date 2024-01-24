@@ -59,20 +59,15 @@ def bench_p3_batch(configs: list[Config]):
         assert(config.graph_name == configs[0].graph_name)
         assert(config.model == configs[0].model)
         
-    graph, train_idx, valid_idx, test_idx = load_topo(configs[0])
-    # if config.graph_name in ["products", "papers100M"]:
-    #     feat, label, num_label = load_feat_label(os.path.join(config.data_dir, config.graph_name))
-    # else:
-    #     v_num = graph.num_nodes()
-    #     feat = None
-    #     num_label = 10
-    #     label = gen_rand_label(v_num, 10)
+    graph, train_idx, valid_idx, test_idx = load_topo(configs[0], is_pinned=True)
+    if config.graph_name in ["products"]:
+        feat, label, num_label = load_feat_label(os.path.join(config.data_dir, config.graph_name))
+    else:
+        v_num = graph.num_nodes()
+        feat = None
+        num_label = 10
+        label = gen_rand_label(v_num, 10)
 
-    v_num = graph.num_nodes()
-    feat = None
-    num_label = 10
-    label = gen_rand_label(v_num, 10)
-        
     for config in configs:
         config.num_classes = num_label
         try:
@@ -119,7 +114,7 @@ def train_p3_ddp(rank: int, config: Config, graph: dgl.DGLGraph, global_feat: to
     local_optimizer = torch.optim.Adam(local_model.parameters(), lr=1e-3)
     global_optimizer = torch.optim.Adam(global_model.parameters(), lr=1e-3)
     # print(f"creating buffers on device: {device}")
-    edge_size_lst: list = [torch.zeros((4,),dtype=torch.int64,device=rank) for i in range(config.world_size)] #(rank, num_edges, num_dst_nodes, num_src_nodes)
+    edge_size_lst: list = [torch.zeros((4,),dtype=torch.int64,device=rank) for _ in range(config.world_size)] #(rank, num_edges, num_dst_nodes, num_src_nodes)
     est_node_size = config.batch_size * 20
     local_feat_width = feat.shape[1]
     input_node_buffer_lst: list[torch.Tensor] = [] # input nodes 
@@ -347,7 +342,7 @@ def train_p3_ddp(rank: int, config: Config, graph: dgl.DGLGraph, global_feat: to
             with torch.no_grad():
                 top_block: dgl.DGLGraph = blocks[0]
                 src, dst = top_block.adj_tensors("coo")
-                edge_size = torch.tensor((rank, src.shape[0], top_block.num_src_nodes(), top_block.num_dst_nodes()),dtype=torch.int64)
+                edge_size = torch.tensor((rank, src.shape[0], top_block.num_src_nodes(), top_block.num_dst_nodes()), dtype=torch.int64, device=rank)
                 dist.all_gather(edge_size_lst, edge_size)
                 
                 for r, edge_size, src_node_size, dst_node_size in edge_size_lst:

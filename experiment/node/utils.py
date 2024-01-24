@@ -244,6 +244,12 @@ def load_dgl_graph(in_dir, is32=False, wsloop=False, is_sym=False)->dgl.DGLGraph
     return dgl.graph(("csc", (indptr, indices, edges)))
 
 def load_idx_split(in_dir, is32=False) -> (torch.Tensor, torch.Tensor, torch.Tensor):
+    graph_name = in_dir.split("/")[-1]
+    if graph_name in ["orkut", "friendster"]:
+        data_dir = "/data/juelin/project/scratch/dgl/experiment/dataset"
+        in_dir = os.path.join(data_dir, graph_name)
+    
+    print("load idx split from", in_dir)
     train_idx = torch.load(os.path.join(in_dir, f"train_idx.pt"))
     valid_idx = torch.load(os.path.join(in_dir, f"valid_idx.pt"))
     test_idx = torch.load(os.path.join(in_dir, f"test_idx.pt"))
@@ -264,6 +270,11 @@ def gen_rand_feat(v_num, feat_dim):
 def gen_rand_label(v_num, num_classes):
     return torch.randint(low=0, high=num_classes, size=(v_num,))
 
+def gen_feat_label(v_num, feat_dim, num_classes=10):
+    feat = gen_rand_feat(v_num, feat_dim)
+    label = gen_rand_label(v_num, num_classes)
+    return feat, label, num_classes
+
 def load_topo(config: Config, is_pinned=False):
     print("Start graph topology loading")
     t1 = Timer()
@@ -282,17 +293,16 @@ def get_feat_dim(config: Config):
     if config.graph_name == "orkut":
         return 1280
     elif config.graph_name == "friendster":
-        return 256
+        return 128
     elif config.graph_name == "papers100M":
         return 128
-    else:
-        return 128
+    elif config.graph_name == "products":
+        return 100
 
 def get_feat_bytes(feat:torch.Tensor):
     res = feat.element_size()
     for dim in feat.shape:
         res *= dim
-        
     return res        
 
 def get_feat_bytes_str(feat:torch.Tensor):
@@ -312,31 +322,15 @@ def load_data(config: Config, is_pinned=False):
     feat = None
     label = None
     num_label = None
-    # if config.graph_name in ["products", "papers100M"]:
-    #     feat, label, num_label = load_feat_label(os.path.join(config.data_dir, config.graph_name))
-    # else:
-    #     v_num = graph.num_nodes()
-    #     feat = None
-    #     num_label = 10
-    #     label = gen_rand_label(v_num, 10)
-    feat_dim = get_feat_dim(config)
-    v_num = graph.num_nodes()
-    num_label = 10
-    feat = gen_rand_feat(v_num, feat_dim)
-    label = gen_rand_label(v_num, num_label)
-    
-    # if config.graph_name in ["products", "papers100M"]:
-    #     feat, label, num_label = load_feat_label(in_dir)
-    # elif config.graph_name == "friendster":
-    #     v_num = graph.num_nodes()
-    #     num_label = 10
-    #     feat = gen_rand_feat(v_num, 128)
-    #     label = gen_rand_label(v_num, num_label)
-    # elif config.graph_name == "orkut":
-    #     v_num = graph.num_nodes()
-    #     num_label = 10
-    #     feat = gen_rand_feat(v_num, 1024)
-    #     label = gen_rand_label(v_num, num_label)
+    if config.graph_name in ["products"]:
+        feat, label, num_label = load_feat_label(os.path.join(config.data_dir, config.graph_name))
+    else:
+        v_num = graph.num_nodes()
+        feat_dim = get_feat_dim(config)
+        feat = gen_rand_feat(v_num, feat_dim)
+        num_label = 10
+        label = gen_rand_label(v_num, 10)
+        
     print(f"Data loading total time {t1.duration()} secs")
     
     if is_pinned:

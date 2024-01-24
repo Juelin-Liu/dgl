@@ -148,7 +148,7 @@ def train_quiver_ddp(rank: int, config: Config, quiver_sampler: quiver.pyg.Graph
         model.eval()
         ys = []
         y_hats = []
-        dataloader = QuiverDglSageSample(rank=rank, world_size=config.world_size, batch_size=config.batch_size, nids=test_idx, sampler=sampler)
+        dataloader = QuiverDglSageSample(rank=rank, world_size=config.world_size, batch_size=config.batch_size, target_idx=test_idx, sampler=quiver_sampler)
         for input_nodes, output_nodes, blocks in dataloader:
             with torch.no_grad():
                 batch_feat = feat[input_nodes]

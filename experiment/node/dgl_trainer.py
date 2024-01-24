@@ -14,7 +14,7 @@ def bench_dgl_batch(configs: list[Config]):
         assert(config.graph_name == configs[0].graph_name)
         assert(config.model == configs[0].model)
         
-    graph, feat, label, train_idx, valid_idx, test_idx, num_label = load_data(configs[0])
+    graph, feat, label, train_idx, valid_idx, test_idx, num_label = load_data(configs[0], is_pinned=True)
     for config in configs:
         config.num_classes = num_label
         try:
@@ -87,7 +87,7 @@ def train_dgl_ddp(rank: int, config: Config, graph: dgl.DGLGraph, feat: torch.Te
             feat_timer = CudaTimer()
             batch_feat = gather_pinned_tensor_rows(feat, input_nodes)
             batch_label = gather_pinned_tensor_rows(label, output_nodes)
-            # dist.barrier()
+            dist.barrier()
             feat_timer.end()            
             
             forward_timer = CudaTimer()
