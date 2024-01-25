@@ -1,4 +1,3 @@
-from dgl.dev import *
 from preprocess.partition import *
 import argparse
 

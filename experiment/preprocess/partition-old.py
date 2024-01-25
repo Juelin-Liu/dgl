@@ -1,5 +1,6 @@
-from preprocess.PyTorchMetis.pytorch_metis import expand_indptr, make_sym, compact_indptr, metis_assignment
-import torch, os, time
+from dgl.dev import CompactCSR, MakeSym, ExpandIndptr
+from dgl.partition import metis_partition_assignment_capi
+import torch, os, time, dgl
 
 class Timer:
     def __init__(self):
@@ -35,6 +36,11 @@ class Config:
         self.test_model_acc = False
         
 def load_idx_split(in_dir, is32=False) -> (torch.Tensor, torch.Tensor, torch.Tensor):
+    # graph_name = in_dir.split("/")[-1]
+    # if graph_name in ["orkut", "friendster"]:
+    #     data_dir = "/data/juelin/project/scratch/dgl/experiment/dataset"
+    #     in_dir = os.path.join(data_dir, graph_name)
+    
     print("load idx split from", in_dir)
     train_idx = torch.load(os.path.join(in_dir, f"train_idx.pt"))
     valid_idx = torch.load(os.path.join(in_dir, f"valid_idx.pt"))
@@ -51,6 +57,10 @@ def load_graph(in_dir, is32=False, wsloop=False, is_sym=False, load_edge_weight=
     edges = torch.empty(0, dtype=indices.dtype)
     if load_edge_weight:
         edges = torch.load(os.path.join(in_dir, "edge_weight.pt")).type(torch.int64)
+    if wsloop and is_sym == False:
+        graph: dgl.DGLGraph = dgl.graph(("csc", (indptr, indices, edges)))
+        graph = dgl.add_self_loop(graph)
+        indptr, indices, edges = graph.adj_tensors("csc")
     if is32:
         return indptr.type(torch.int32), indices.type(torch.int32), edges.type(torch.int32)
     else:
@@ -76,7 +86,7 @@ def load_metis_graph(config:Config, node_mode: str, edge_mode: str):
         flag = edge_weight > 0
         indices = indices[flag].clone()
         edge_weight = edge_weight[flag].clone()
-        indptr = compact_indptr(indptr, flag)
+        indptr = CompactCSR(indptr, flag.type(torch.uint8))
         remain_ratio = flag.sum() / flag.shape[0] * 100
         e_num = flag.sum()
         print(f"remove {round(100 - remain_ratio.item())}% edges in {timer.duration()} secs", flush=True)
@@ -84,16 +94,19 @@ def load_metis_graph(config:Config, node_mode: str, edge_mode: str):
     timer.reset()
     if is_sym == False or load_edge_weight:
         # remove self edges
-        src = expand_indptr(indptr)
+        src = ExpandIndptr(indptr)
         flag = src != indices
         indices = indices[flag].clone()
         if load_edge_weight:
             edge_weight = edge_weight[flag].clone()
-        indptr = compact_indptr(indptr, flag)
+        indptr = CompactCSR(indptr, flag.type(torch.uint8))
         print(f"aftre remove self edges in {timer.duration()} secs", flush=True)
-        indptr, indices, edge_weight = make_sym(indptr, indices, edge_weight)
+        indptr, indices, edge_weight = MakeSym(indptr=indptr, indices=indices, data=edge_weight)
         print(f"convert graph org_enum={e_num} to sym_enum={indices.shape[0]} in {timer.duration()} secs", flush=True)
     
+    graph = dgl.graph(("csr", (indptr, indices, edge_weight)))
+
+    assert(graph.num_nodes() == v_num)
     node_weight = None
     if node_mode == "uniform":
         node_weight = torch.ones((v_num,), dtype=torch.int64)
@@ -102,7 +115,7 @@ def load_metis_graph(config:Config, node_mode: str, edge_mode: str):
     elif node_mode in ["src", "dst", "input"]:
         node_weight = torch.load(f"{in_dir}/{node_mode}_node_weight.pt")
         node_weight = node_weight * 8 + 1
-    return node_weight.type(torch.int64), indptr, indices, edge_weight
+    return node_weight.type(torch.int64), graph
 
 def partition(config: Config, node_mode:str, edge_mode:str, bal: str):
     assert node_mode in ["uniform", "degree", "src", "dst", "input"]    
@@ -110,10 +123,10 @@ def partition(config: Config, node_mode:str, edge_mode:str, bal: str):
     assert bal in ["bal", "xbal"]
     
     timer = Timer()
-    node_weight, indptr, indices, edge_weight = load_metis_graph(config, node_mode, edge_mode)
+    node_weight, graph = load_metis_graph(config, node_mode, edge_mode)
     print(f"load graph in {timer.duration()} secs", flush=True)
     if bal == "bal":
-        v_num = indptr.shape[0] - 1
+        v_num = graph.num_nodes()
         vwgts = [node_weight]
         in_dir = os.path.join(config.data_dir, config.graph_name)
         train, valid, test = load_idx_split(in_dir)
@@ -123,9 +136,7 @@ def partition(config: Config, node_mode:str, edge_mode:str, bal: str):
             vwgts.append(wgt)
         node_weight = torch.concat(vwgts).clone()
     assert(node_weight.is_contiguous())
-    if edge_mode == "uniform":
-        edge_weight = torch.empty((0,), dtype=torch.int64)
-    assignment = metis_assignment(config.world_size, indptr, indices, node_weight, edge_weight, True)
+    assignment = metis_partition_assignment_capi(sym_g=graph, k=config.world_size, vwgt=node_weight, mode="k-way", objtype="cut", use_edge_weight=edge_mode != "uniform")
     file_name = f"{config.graph_name}_w{config.world_size}_n{node_mode}_e{edge_mode}_{bal}.pt"
     out_dir = os.path.join(config.data_dir, "partition_ids", config.graph_name)
     os.makedirs(out_dir, exist_ok=True)
