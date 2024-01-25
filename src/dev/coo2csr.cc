@@ -56,6 +56,11 @@ DGL_REGISTER_GLOBAL("dev._CAPI_MakeSym")
       *rv=out_indptr;
     });
 
+    DGL_REGISTER_GLOBAL("dev._CAPI_ExpandIndptr")
+    .set_body([](DGLArgs args, DGLRetValue *rv) {
+      NDArray in_indptr = args[0];
+      *rv= ExpandIndptr(in_indptr);
+    });
     DGL_REGISTER_GLOBAL("dev._CAPI_LoadSNAP")
     .set_body([](DGLArgs args, DGLRetValue *rv) {
       std::string in_file = args[0];

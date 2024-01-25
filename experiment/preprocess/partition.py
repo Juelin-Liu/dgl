@@ -1,4 +1,4 @@
-from dgl.dev import CompactCSR, MakeSym
+from dgl.dev import CompactCSR, MakeSym, ExpandIndptr
 from dgl.partition import metis_partition_assignment_capi
 import torch, os, time, dgl
 
@@ -89,10 +89,18 @@ def load_metis_graph(config:Config, node_mode: str, edge_mode: str):
         indptr = CompactCSR(indptr, flag.type(torch.uint8))
         remain_ratio = flag.sum() / flag.shape[0] * 100
         e_num = flag.sum()
-        print(f"prunning {round(100 - remain_ratio.item())}% edges in {timer.duration()} secs", flush=True)
-        # print(f"pruned {indptr=} {indices=} {edge_weight=}")
+        print(f"remove {round(100 - remain_ratio.item())}% edges in {timer.duration()} secs", flush=True)
+        
     timer.reset()
     if is_sym == False or load_edge_weight:
+        # remove self edges
+        src = ExpandIndptr(indptr)
+        flag = src != indices
+        indices = indices[flag].clone()
+        edge_weight = edge_weight[flag].clone()
+        indptr = CompactCSR(indptr, flag.type(torch.uint8))
+        print(f"aftre remove self edges in {timer.duration()} secs", flush=True)
+
         indptr, indices, edge_weight = MakeSym(indptr=indptr, indices=indices, data=edge_weight)
         graph = dgl.graph(("csr", (indptr, indices, edge_weight)))
         graph = dgl.remove_self_loop(graph)

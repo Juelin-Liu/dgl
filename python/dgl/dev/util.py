@@ -83,3 +83,7 @@ def LoadSNAP(in_file: str, to_sym=True):
     indptr = F.from_dgl_nd(ret(0))
     indices = F.from_dgl_nd(ret(1))
     return indptr, indices
+
+def ExpandIndptr(indptr: Tensor):
+    src = _CAPI_ExpandIndptr(F.to_dgl_nd(indptr))
+    return F.from_dgl_nd(src)

@@ -17,6 +17,7 @@
 #include <atomic>
 #include <filesystem>
 #include <fstream>
+#include "dgl/aten/macro.h"
 #include "dgl/runtime/ndarray.h"
 #include "metis.h"
 
@@ -96,7 +97,7 @@ namespace dgl::dev
     memset(indptr.Ptr<void>(), 0, sizeof(idx_t) * (v_num + 1));
     memset(retdata.Ptr<void>(), 0, sizeof(idx_t) * cur_e_num);
     memset(indices.Ptr<void>(), 0, sizeof(idx_t) * cur_e_num);
-    std::vector<std::atomic<int64_t>> degree(v_num + 1, 0);
+    std::vector<std::atomic<int64_t>> degree(v_num + 1);
     int64_t * indices_ptr = indices.Ptr<int64_t>();
     int64_t * retdata_ptr = retdata.Ptr<int64_t>();
     LOG(INFO) << "COO2CSR compute degree";
@@ -122,6 +123,33 @@ namespace dgl::dev
     CHECK_EQ(out_start[v_num], edge_vec.size());
     return {indptr, indices, retdata};
   } // COO2CSR
+  
+  inline NDArray ExpandIndptr(NDArray in_indptr) {
+    auto dtype = in_indptr->dtype;
+    int64_t v_num = in_indptr.NumElements() - 1;
+    ATEN_ID_TYPE_SWITCH(dtype, IdType, {
+
+      auto _in_indptr = in_indptr.Ptr<IdType>();
+      IdType e_num = _in_indptr[v_num];
+
+      IdArray indices = NDArray::Empty({e_num}, dtype, in_indptr->ctx);
+      auto _indices = indices.Ptr<IdType>();
+      tbb::parallel_for( tbb::blocked_range<int64_t >(0, v_num),
+                       [&](tbb::blocked_range<int64_t > r)
+      {
+          for (int64_t v=r.begin(); v<r.end(); v++)
+          {
+            IdType start = _in_indptr[v];
+            IdType end = _in_indptr[v+1];
+            for (IdType i = start; i < end; i++) {
+              _indices[i] = v;
+            }
+          }
+      });
+      return indices;
+    });
+    return aten::NullArray();
+  };
 
   inline std::tuple<IdArray, IdArray, IdArray> MakeSym(NDArray in_indptr, NDArray in_indices, NDArray data) {
     auto dtype = in_indices->dtype;
@@ -162,7 +190,7 @@ namespace dgl::dev
     memset(indptr.Ptr<void>(), 0, sizeof(idx_t) * (v_num + 1));
     memset(retdata.Ptr<void>(), 0, sizeof(idx_t) * cur_e_num);
     memset(indices.Ptr<void>(), 0, sizeof(idx_t) * cur_e_num);
-    std::vector<std::atomic<int64_t>> degree(v_num + 1, 0);
+    std::vector<std::atomic<int64_t>> degree(v_num + 1);
     int64_t * indices_ptr = indices.Ptr<int64_t>();
     int64_t * retdata_ptr = retdata.Ptr<int64_t>();
     LOG(INFO) << "MakeSym compute degree";
@@ -371,7 +399,7 @@ namespace dgl::dev
     LOG(INFO) << "ReindexCSR e_num before compact = " << e_num;
     bool * _in_indices = flag.Ptr<bool>();
     const int64_t * _in_indptr = in_indptr.Ptr<int64_t>();
-    std::vector<int64_t> degree(v_num + 1, 0);
+    std::vector<int64_t> degree(v_num + 1);
     tbb::parallel_for( tbb::blocked_range<int64_t >(0, v_num),
                       [&](tbb::blocked_range<int64_t > r)
     {

@@ -8,7 +8,9 @@ from node.utils import *
 from dgl.dev import *
 
 def freq(config: Config):
-    graph, train_idx, valid_idx, test_idx = load_topo(config, is_pinned=True)
+    graph, train_idx, valid_idx, test_idx = load_topo(config, is_pinned=False)
+    graph: dgl.DGLGraph = dgl.remove_self_loop(graph)
+    graph.pin_memory_()
     try:
         spawn(_freq, args=(config, graph, train_idx), nprocs=config.world_size)
     except Exception as e:
