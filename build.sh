@@ -1,3 +1,3 @@
 #!/bin/bash
 
-cmake -B build && cmake --build build -j
+cmake -B build -GNinja && cmake --build build -j

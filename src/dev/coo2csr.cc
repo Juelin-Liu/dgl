@@ -26,7 +26,20 @@ DGL_REGISTER_GLOBAL("dev._CAPI_COO2CSR")
         *rv=ConvertNDArrayVectorToPackedFunc({indptr, indices, in_data});
       }
     });
-
+DGL_REGISTER_GLOBAL("dev._CAPI_MakeSym")
+    .set_body([](DGLArgs args, DGLRetValue *rv) {
+      NDArray in_indptr = args[0];
+      NDArray in_indices = args[1];
+      NDArray in_data = args[2];
+      if (in_data.NumElements() != 0) {
+        CHECK_EQ(in_data.NumElements(), in_indices.NumElements());
+        const auto [indptr, indices, data] = MakeSym(in_indptr, in_indices, in_data);
+        *rv=ConvertNDArrayVectorToPackedFunc({indptr, indices, data});
+      } else {
+        const auto [indptr, indices] = MakeSym(in_indptr, in_indices);
+        *rv=ConvertNDArrayVectorToPackedFunc({indptr, indices, in_data});
+      }
+    });
     DGL_REGISTER_GLOBAL("dev._CAPI_ReindexCSR")
     .set_body([](DGLArgs args, DGLRetValue *rv) {
       NDArray in_indptr = args[0];

@@ -52,6 +52,16 @@ def COO2CSR(v_num: int, src: Tensor, dst: Tensor, data: Tensor=Tensor([]), to_un
     data = F.from_dgl_nd(ret(2))
     return (indptr, indices, data)
 
+def MakeSym(indptr:Tensor, indices:Tensor, data: Tensor=Tensor([])):
+    indptr = F.to_dgl_nd(indptr)
+    indices = F.to_dgl_nd(indices)
+    data = F.to_dgl_nd(data)
+    ret = _CAPI_MakeSym(indptr, indices, data)
+    
+    indptr = F.from_dgl_nd(ret(0))
+    indices = F.from_dgl_nd(ret(1))
+    data = F.from_dgl_nd(ret(2))
+    return (indptr, indices, data)
 
 def ReindexCSR(indptr: Tensor, indices: Tensor):
     indptr = F.to_dgl_nd(indptr)

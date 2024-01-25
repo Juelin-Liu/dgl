@@ -1,10 +1,11 @@
 from dgl.dev import *
 from preprocess.partition import *
 import argparse
+
 def get_parser():
     parser = argparse.ArgumentParser(description='local run script')
     parser.add_argument('--graph_name', default="products", type=str, help="Input graph name", choices=["products", "papers100M", "orkut", "friendster"])
-    parser.add_argument('--data_dir', default="/data/juelin/dataset/gsplit", type=str, help="Input graph directory")
+    parser.add_argument('--data_dir', default="/work/pi_mserafini_umass_edu/dataset/gsplit/", type=str, help="Input graph directory")
     parser.add_argument('--world_size', default=4, type=int, help='Number of GPUs')
     parser.add_argument('--node_mode', default="uniform", type=str, help="Node weight configuraion", choices=["uniform", "degree", "src", "dst", "input"] )
     parser.add_argument('--edge_mode', default="uniform", type=str, help="Edge weight configuraion", choices=["uniform", "freq"])

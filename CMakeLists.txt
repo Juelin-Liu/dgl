@@ -16,7 +16,7 @@ include(cmake/util/FindCUDA.cmake)
 # Options for building DGL.
 # NOTE: Please avoid editing this file to change build type. Instead, using
 # bash script/build_dgl.sh -e -t release to overwrite the value.
-dgl_option(BUILD_TYPE "Type of the build: dev, dogfood or release" "release")
+dgl_option(BUILD_TYPE "Type of the build: dev, dogfood or release" "dev")
 message(STATUS "Build for ${BUILD_TYPE}")
 
 dgl_option(USE_CUDA "Build with CUDA" ON)
@@ -49,7 +49,7 @@ dgl_option(EXTERNAL_GKLIB_PATH "Path to external gklib" OFF)
 dgl_feature_option(
     BUILD_SPARSE
     "Build DGL sparse library"
-    "all"
+    "none"
 )
 dgl_feature_option(
     BUILD_TORCH
@@ -103,7 +103,7 @@ dgl_feature_option(
 dgl_feature_option(
     BUILD_CPP_TEST
     "Build cpp unittest executables"
-    "dev"
+    "none"
 )
 
 if (EXTERNAL_DLPACK_PATH OR EXTERNAL_DMLC_PATH OR EXTERNAL_NANOFLANN_PATH OR EXTERNAL_NANOFLANN_PATH OR EXTERNAL_METIS_PATH OR EXTERNAL_GKLIB_PATH)

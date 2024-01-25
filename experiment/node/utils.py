@@ -18,7 +18,9 @@ def ddp_setup(rank, world_size):
 def ddp_exit():
     dist.destroy_process_group()
 
-def get_memory_info(device=torch.cuda.current_device(), rd=0):
+def get_memory_info(device=None, rd=0):
+    if device == None:
+        device = torch.cuda.current_device()
     allocated_mb = torch.cuda.memory_allocated(device) / 1024 / 1024
     reserved_mb = torch.cuda.memory_reserved(device) / 1024 / 1024
     allocated_mb = round(allocated_mb, rd)

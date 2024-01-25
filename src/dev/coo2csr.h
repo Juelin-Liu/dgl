@@ -96,7 +96,7 @@ namespace dgl::dev
     memset(indptr.Ptr<void>(), 0, sizeof(idx_t) * (v_num + 1));
     memset(retdata.Ptr<void>(), 0, sizeof(idx_t) * cur_e_num);
     memset(indices.Ptr<void>(), 0, sizeof(idx_t) * cur_e_num);
-    std::vector<std::atomic<int64_t>> degree(v_num + 1);
+    std::vector<std::atomic<int64_t>> degree(v_num + 1, 0);
     int64_t * indices_ptr = indices.Ptr<int64_t>();
     int64_t * retdata_ptr = retdata.Ptr<int64_t>();
     LOG(INFO) << "COO2CSR compute degree";
@@ -106,7 +106,7 @@ namespace dgl::dev
     {
         for (int64_t i=r.begin(); i<r.end(); i++)
         {
-          const EdgeWithData& e = edge_vec.at(i);
+          const auto& e = edge_vec.at(i);
           degree.at(e._src)++;
           indices_ptr[i] = e._dst;
           retdata_ptr[i] = e._data;
@@ -116,11 +116,143 @@ namespace dgl::dev
     LOG(INFO) << "COO2CSR compute indptr";
     auto out_start = indptr.Ptr<int64_t>();
     auto out_end = std::exclusive_scan(degree.begin(), degree.end(), out_start, 0ll);
+    LOG(INFO) << "COO2CSR e_num after convert " << cur_e_num;
 
     CHECK_EQ(out_end - out_start, v_num + 1);
     CHECK_EQ(out_start[v_num], edge_vec.size());
     return {indptr, indices, retdata};
   } // COO2CSR
+
+  inline std::tuple<IdArray, IdArray, IdArray> MakeSym(NDArray in_indptr, NDArray in_indices, NDArray data) {
+    auto dtype = in_indices->dtype;
+    int64_t e_num = in_indices.NumElements();
+    int64_t v_num = in_indptr.NumElements() - 1;
+    LOG(INFO) << "MakeSym v_num: " << v_num << " | e_num: " << e_num;
+    typedef std::vector<EdgeWithData> EdgeVec;
+    EdgeVec edge_vec;
+    edge_vec.resize(e_num * 2);
+    ATEN_ID_TYPE_SWITCH(dtype, IdType, {
+      auto _in_indptr = in_indptr.Ptr<IdType>();
+      auto _in_indices = in_indices.Ptr<IdType>();
+      auto data_ptr = data.Ptr<IdType>();
+      tbb::parallel_for( tbb::blocked_range<int64_t >(0, v_num),
+                       [&](tbb::blocked_range<int64_t > r)
+      {
+          for (int64_t v=r.begin(); v<r.end(); v++)
+          {
+            IdType start = _in_indptr[v];
+            IdType end = _in_indptr[v+1];
+            for (IdType i = start; i < end; i++) {
+              IdType u = _in_indices[i];
+              edge_vec.at(i * 2) = {v, u, data_ptr[i]};
+              edge_vec.at(i * 2 + 1) = {u, v, data_ptr[i]};
+            }
+          }
+      });
+    });
+    LOG(INFO) << "MakeSym start sorting";
+    tbb::parallel_sort(edge_vec.begin(), edge_vec.end());
+    edge_vec.erase(std::unique(edge_vec.begin(), edge_vec.end()), edge_vec.end());
+    edge_vec.shrink_to_fit();
+    int64_t cur_e_num = edge_vec.size();
+    IdArray indptr = aten::NewIdArray(v_num + 1);
+    IdArray indices = aten::NewIdArray(cur_e_num);
+    IdArray retdata = aten::NewIdArray(cur_e_num);
+
+    memset(indptr.Ptr<void>(), 0, sizeof(idx_t) * (v_num + 1));
+    memset(retdata.Ptr<void>(), 0, sizeof(idx_t) * cur_e_num);
+    memset(indices.Ptr<void>(), 0, sizeof(idx_t) * cur_e_num);
+    std::vector<std::atomic<int64_t>> degree(v_num + 1, 0);
+    int64_t * indices_ptr = indices.Ptr<int64_t>();
+    int64_t * retdata_ptr = retdata.Ptr<int64_t>();
+    LOG(INFO) << "MakeSym compute degree";
+
+    tbb::parallel_for( tbb::blocked_range<int64_t >(0, edge_vec.size()),
+                      [&](tbb::blocked_range<int64_t > r)
+    {
+        for (int64_t i=r.begin(); i<r.end(); i++)
+        {
+          const auto& e = edge_vec.at(i);
+          degree.at(e._src)++;
+          indices_ptr[i] = e._dst;
+          retdata_ptr[i] = e._data;
+        }
+    });
+
+    LOG(INFO) << "MakeSym compute indptr";
+    auto out_start = indptr.Ptr<int64_t>();
+    auto out_end = std::exclusive_scan(degree.begin(), degree.end(), out_start, 0ll);
+    LOG(INFO) << "MakeSym e_num after convert " << cur_e_num;
+
+    CHECK_EQ(out_end - out_start, v_num + 1);
+    CHECK_EQ(out_start[v_num], edge_vec.size());
+    return {indptr, indices, retdata};
+  } // MakeSym
+
+  inline std::tuple<IdArray, IdArray> MakeSym(NDArray in_indptr, NDArray in_indices) {
+    auto dtype = in_indices->dtype;
+    int64_t e_num = in_indices.NumElements();
+    int64_t v_num = in_indptr.NumElements() - 1;
+    LOG(INFO) << "MakeSym v_num: " << v_num << " | e_num: " << e_num;
+    typedef std::vector<Edge> EdgeVec;
+    EdgeVec edge_vec;
+    edge_vec.resize(e_num * 2);
+    ATEN_ID_TYPE_SWITCH(dtype, IdType, {
+      auto _in_indptr = in_indptr.Ptr<IdType>();
+      auto _in_indices = in_indices.Ptr<IdType>();
+      tbb::parallel_for( tbb::blocked_range<int64_t >(0, v_num),
+                       [&](tbb::blocked_range<int64_t > r)
+      {
+          for (int64_t v=r.begin(); v<r.end(); v++)
+          {
+            int64_t start = _in_indptr[v];
+            int64_t end = _in_indptr[v+1];
+            for (int64_t i = start; i < end; i++) {
+              int64_t u = _in_indices[i];
+              edge_vec.at(i * 2) = {v, u};
+              edge_vec.at(i * 2 + 1) = {u, v};
+            }
+          }
+      });
+    });
+    LOG(INFO) << "MakeSym start sorting";
+    tbb::parallel_sort(edge_vec.begin(), edge_vec.end());
+    edge_vec.erase(std::unique(edge_vec.begin(), edge_vec.end()), edge_vec.end());
+    edge_vec.shrink_to_fit();
+    int64_t cur_e_num = edge_vec.size();
+    IdArray indptr = aten::NewIdArray(v_num + 1);
+    IdArray indices = aten::NewIdArray(cur_e_num);
+    // IdArray retdata = aten::NewIdArray(cur_e_num);
+
+    memset(indptr.Ptr<void>(), 0, sizeof(idx_t) * (v_num + 1));
+    // memset(retdata.Ptr<void>(), 0, sizeof(idx_t) * cur_e_num);
+    memset(indices.Ptr<void>(), 0, sizeof(idx_t) * cur_e_num);
+    std::vector<std::atomic<int64_t>> degree(v_num + 1);
+    int64_t * indices_ptr = indices.Ptr<int64_t>();
+    // int64_t * retdata_ptr = retdata.Ptr<int64_t>();
+    LOG(INFO) << "MakeSym compute degree";
+
+    tbb::parallel_for( tbb::blocked_range<int64_t >(0, edge_vec.size()),
+                      [&](tbb::blocked_range<int64_t > r)
+    {
+        for (int64_t i=r.begin(); i<r.end(); i++)
+        {
+          const auto& e = edge_vec.at(i);
+          degree.at(e._src)++;
+          indices_ptr[i] = e._dst;
+          // retdata_ptr[i] = e._data;
+        }
+    });
+
+    LOG(INFO) << "COO2CSR compute indptr";
+    auto out_start = indptr.Ptr<int64_t>();
+    auto out_end = std::exclusive_scan(degree.begin(), degree.end(), out_start, 0ll);
+    LOG(INFO) << "COO2CSR e_num after convert " << cur_e_num;
+
+    CHECK_EQ(out_end - out_start, v_num + 1);
+    CHECK_EQ(out_start[v_num], edge_vec.size());
+    return {indptr, indices};
+  } // MakeSym
 
   inline std::tuple<IdArray, IdArray> COO2CSR(int64_t v_num, NDArray src, NDArray dst, bool to_undirected) {
     auto dtype = src->dtype;
@@ -172,10 +304,12 @@ namespace dgl::dev
 
     LOG(INFO) << "COO2CSR compute indptr";
     auto out_end = std::exclusive_scan(degree.begin(), degree.end(), out_start, 0ll);
+    LOG(INFO) << "COO2CSR e_num after convert " << cur_e_num;
 
     CHECK_EQ(out_end - out_start, v_num + 1);
     CHECK_EQ(out_start[v_num], edge_vec.size());
     return {indptr, indices};
+
   } // COO2CSR
 
   // Remove vertices with 0 degree
@@ -233,7 +367,7 @@ namespace dgl::dev
   inline NDArray CompactCSR(NDArray in_indptr, NDArray flag) {
     int64_t v_num = in_indptr.NumElements() - 1;
     int64_t e_num = flag.NumElements();
-    CHECK_EQ(flag->dtype, DGLDataTypeTraits<bool>::dtype);
+    // CHECK_EQ(flag->dtype, DGLDataTypeTraits<bool>::dtype);
     LOG(INFO) << "ReindexCSR e_num before compact = " << e_num;
     bool * _in_indices = flag.Ptr<bool>();
     const int64_t * _in_indptr = in_indptr.Ptr<int64_t>();
