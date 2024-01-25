@@ -28,3 +28,6 @@
 [submodule "third_party/oneTBB"]
 	path = third_party/oneTBB
 	url = https://github.com/oneapi-src/oneTBB.git
+[submodule "experiment/preprocess/Metis"]
+	path = experiment/preprocess/Metis
+	url = https://github.com/Juelin-Liu/Metis.git
