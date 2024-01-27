@@ -125,9 +125,13 @@ def partition(config: Config, node_mode:str, edge_mode:str, bal: str):
     assert(node_weight.is_contiguous())
     if edge_mode == "uniform":
         edge_weight = torch.empty((0,), dtype=torch.int64)
+    
+    timer.reset()
     assignment = metis_assignment(config.world_size, indptr, indices, node_weight, edge_weight, True)
+    print(f"metis partition in {timer.duration()} secs", flush=True)
+    timer.reset()
     file_name = f"{config.graph_name}_w{config.world_size}_n{node_mode}_e{edge_mode}_{bal}.pt"
     out_dir = os.path.join(config.data_dir, "partition_ids", config.graph_name)
     os.makedirs(out_dir, exist_ok=True)
-    print(f"saving file to {out_dir}/{file_name}", flush=True)
+    print(f"saving file to {out_dir}/{file_name} in {timer.duration()} secs", flush=True)
     torch.save(assignment, os.path.join(out_dir, file_name))
