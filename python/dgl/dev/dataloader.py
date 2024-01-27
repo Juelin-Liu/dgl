@@ -12,6 +12,7 @@ class SampleConfig:
     mode: str = "uva" # must be one of ["uva", "gpu"]
     reindex: bool = True # wheter to make the sampled vertex to be 0 indexed
     fanouts: list[int] = None
+    drop_last : bool = False
     def header(self):
         return ["rank","world_size", "batch_size", "replace", "mode", "reindex", "fanouts"]
     def content(self):
@@ -40,7 +41,7 @@ class GraphDataloader:
                 
         self.global_target_idx = target_idx
         self.target_idx = target_idx[config.rank*self.loc_idx_size:(config.rank+1) * self.loc_idx_size].clone().to(self.device)
-        self.idx_loader = DataLoader(self.target_idx.to(self.device), batch_size=self.batch_size)
+        self.idx_loader = DataLoader(self.target_idx.to(self.device), batch_size=self.batch_size, drop_last=config.drop_last)
         self.iter = iter(self.idx_loader)
         self.config = config
     
