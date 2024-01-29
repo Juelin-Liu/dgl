@@ -349,4 +349,4 @@ def log_step(rank, epoch, step, step_per_epoch, timer):
         cur_step = step % step_per_epoch
         if cur_step == 0:
             cur_step = step_per_epoch
-        print(f"{epoch=} {cur_step=} / {step_per_epoch} time={timer.duration()} secs")
+        print(f"{epoch=} {cur_step=} / {step_per_epoch} time={timer.duration()} secs", flush=True)

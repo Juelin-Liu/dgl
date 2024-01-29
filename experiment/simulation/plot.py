@@ -40,8 +40,43 @@ def load_idx_split(in_dir, is32=False) -> (torch.Tensor, torch.Tensor, torch.Ten
         return train_idx, valid_idx, test_idx
 
 def plots(name2workload, mode, outpath=None):
-    fig, ax = plt.subplots(figsize=(8, 5))
+    font = {'size' : 16} 
+    plt.rc('font', **font)
+    
+    fig, ax = plt.subplots(figsize=(6, 4))
+        
+    node2color = {"nuniform": "gray",
+                 "ndegree": "gold",
+                 "ndst": "tab:blue",
+                 "nrandom": "tab:red"}
+    edge2color = {"euniform": "tab:blue",
+             "efreq": "tab:purple"}
+    
+    def get_color(node_mode, edge_mode, bal):
+        if node_mode == "ndst":
+            return edge2color[edge_mode]
+        else:
+            return node2color[node_mode]
+        
+    def get_label(node_mode, edge_mode, bal):
+        if node_mode == "nrandom":
+            return "Random"
+        if node_mode == "nuniform":
+            return "Node"
+        elif node_mode == "ndegree":
+            return "Edge"
+        elif node_mode == "ndst":
+            if edge_mode == "euniform":
+                return "Score"
+            else:
+                return "Score+"
+            
+        print("Invalid input", node_mode, edge_mode, bal)
+        return "Null Label"
+    
+    step = 0
     for pname, workload in name2workload.items():
+        
         world_size, vmode, emode, bal = pname.split("_")
 
         def slice_row(row:torch.Tensor,start:int, step:int):
@@ -53,28 +88,52 @@ def plots(name2workload, mode, outpath=None):
         tcrs = slice_row(workload["crs"], 0, 3)
         tinput = slice_row(workload["input"], 0, 3)
         tsum = tcrs + tloc
-        # tdist = (train_dist / torch.sum(train_dist)).to("cpu").numpy()
-        xticks = [f"P{i}" for i in range(4)]
-        cnts = {
-            "Local Edges": torch.sum(tloc, dim=0).numpy(),
-            "Cross Edges": torch.sum(tcrs, dim=0).numpy(),
-        }
         width = 0.5
         tsmax, tsmax_idx = torch.max(tsum, dim=1)
         timax, timax_idx = torch.max(tinput, dim=1)
         tcsum = torch.sum(tcrs, dim=1)
+        
+        label = get_label(vmode, emode, bal)
+        color = get_color(vmode, emode, bal)
+        
         if mode == "edge":
             x = tsmax / torch.sum(tsum, dim=1) * 4
-            ax.hist(x, bins=100, label=f"{vmode} {emode} {bal}", alpha = 0.7)
+            ax.hist(x, bins=100, label=label, alpha = 0.6, color=color)
+            # error bar
+            ymin, ymax = plt.ylim()
+            ylow = ymax / 3
+            yhigh = ymax / 3 * 2
+            y = torch.randint(low=int(ylow), high=int(yhigh), size=(1,))
+            x_mean = torch.mean(x)
+            x_std = torch.std(x)
+            ax.errorbar(x=x_mean, y=y, xerr=x_std, capsize=5, capthick=3, color=color)
+            
         elif mode == "crs":
             x = tcsum / torch.sum(tsum, dim=1)
-            ax.hist(x, bins=100, label=f"{vmode} {emode} {bal}", alpha = 0.7)
+            ax.hist(x, bins=100, label=label, alpha = 0.6, color=color)
+            # error bar
+            ymin, ymax = plt.ylim()
+            ylow = ymax / 3
+            yhigh = ymax / 3 * 2
+            y = torch.randint(low=int(ylow), high=int(yhigh), size=(1,))
+            x_mean = torch.mean(x)
+            x_std = torch.std(x)
+            ax.errorbar(x=x_mean, y=y, xerr=x_std, capsize=5, capthick=3, color=color)
         elif mode == "input":
             x = timax / torch.sum(tinput, dim=1)
-            ax.hist(x, bins=100, label=f"{vmode} {emode} {bal}", alpha = 0.7)
-
+            ax.hist(x, bins=100, label=label, alpha = 0.6, color=color)
+            # error bar 
+            ymin, ymax = plt.ylim()
+            ylow = ymax / 3
+            yhigh = ymax / 3 * 2
+            y = torch.randint(low=int(ylow), high=int(yhigh), size=(1,))
+            x_mean = torch.mean(x)
+            x_std = torch.std(x)
+            ax.errorbar(x=x_mean, y=y, xerr=x_std, capsize=5, capthick=3, color=color)
+        step += 1
+        
     ax.set_title("Workload Inbalance of Mini-Batches")
-    ax.set_ylabel("PDF")
+    ax.set_ylabel("Frequency")
     if mode == "edge":
         ax.set_xlabel("# Max Edges / Average Edges")
     elif mode == "crs":

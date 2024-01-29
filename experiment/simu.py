@@ -9,8 +9,8 @@ def get_parser():
     parser.add_argument('--graph_name', default="products", type=str, help="Input graph name", choices=["products", "papers100M", "orkut", "friendster"])
     parser.add_argument('--data_dir', default="/data/juelin/dataset/gsplit", type=str, help="Input graph directory")
     parser.add_argument('--world_size', default=4, type=int, help='Number of GPUs')
-    parser.add_argument('--node_mode', default="uniform", type=str, help="Node weight configuraion", choices=["uniform", "degree", "src", "dst", "input"] )
-    parser.add_argument('--edge_mode', default="uniform", type=str, help="Edge weight configuraion", choices=["uniform", "freq"])
+    parser.add_argument('--node_mode', default="uniform", type=str, help="Node weight configuraion", choices=["uniform", "degree", "src", "dst", "input", "random"] )
+    parser.add_argument('--edge_mode', default="uniform", type=str, help="Edge weight configuraion", choices=["uniform", "freq", "random"])
     parser.add_argument('--bal', default="bal", type=str, help='Balance target idx on each partition or not', choices=["bal", "xbal"])
     return parser
 

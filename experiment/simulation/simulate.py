@@ -14,8 +14,12 @@ def load_partition_map(config:Config, node_mode: str, edge_mode: str, bal: str, 
 
 def simulate(config: Config, node_mode: str, edge_mode: str, bal: str):
     graph, train_idx, valid_idx, test_idx = load_topo(config, is_pinned=True)
-    partition_map = load_partition_map(config, node_mode, edge_mode, bal)
-    graph.pin_memory_()
+    partition_map = None
+    if node_mode != "random":
+        partition_map = load_partition_map(config, node_mode, edge_mode, bal)
+    else:
+        v_num = graph.num_nodes()
+        partition_map = torch.randint(low=0, high=config.world_size,size=(v_num,),dtype=torch.int64)
     try:
         spawn(_simulate, args=(config, graph, train_idx, partition_map, node_mode, edge_mode, bal), nprocs=config.world_size)
     except Exception as e:
@@ -30,7 +34,12 @@ def _simulate(rank: int, config: Config, graph: dgl.DGLGraph, train_idx: torch.T
     if rank == 0:
         print(config)
     mode = "uva"
-    graph = graph.pin_memory_()    
+    if "friendster" in config.graph_name:
+        graph = graph.pin_memory_()
+        mode = "uva"
+    else:
+        graph = graph.to(rank)
+        mode = "gpu"
     sample_config = SampleConfig(rank=rank, batch_size=config.batch_size * config.world_size, world_size=config.world_size, mode=mode, fanouts=config.fanouts, reindex=False, drop_last=True)
     dataloader = GraphDataloader(graph, train_idx, sample_config)
     step = 0
