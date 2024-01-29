@@ -49,8 +49,8 @@ def plots(name2workload, mode, outpath=None):
                  "ndegree": "gold",
                  "ndst": "tab:blue",
                  "nrandom": "tab:red"}
-    edge2color = {"euniform": "tab:blue",
-             "efreq": "tab:purple"}
+    edge2color = {"euniform": "tab:purple",
+             "efreq": "tab:blue"}
     
     def get_color(node_mode, edge_mode, bal):
         if node_mode == "ndst":
@@ -67,14 +67,16 @@ def plots(name2workload, mode, outpath=None):
             return "Edge"
         elif node_mode == "ndst":
             if edge_mode == "euniform":
-                return "Score"
+                return "Split w/o escore"
             else:
-                return "Score+"
+                return "Split"
             
         print("Invalid input", node_mode, edge_mode, bal)
         return "Null Label"
     
     step = 0
+    num_bins = 100 // len(name2workload.items())
+    
     for pname, workload in name2workload.items():
         
         world_size, vmode, emode, bal = pname.split("_")
@@ -98,7 +100,7 @@ def plots(name2workload, mode, outpath=None):
         
         if mode == "edge":
             x = tsmax / torch.sum(tsum, dim=1) * 4
-            ax.hist(x, bins=100, label=label, alpha = 0.6, color=color)
+            ax.hist(x, bins=num_bins, label=label, alpha = 0.6, color=color)
             # error bar
             ymin, ymax = plt.ylim()
             ylow = ymax / 3
@@ -110,7 +112,7 @@ def plots(name2workload, mode, outpath=None):
             
         elif mode == "crs":
             x = tcsum / torch.sum(tsum, dim=1)
-            ax.hist(x, bins=100, label=label, alpha = 0.6, color=color)
+            ax.hist(x, bins=num_bins, label=label, alpha = 0.6, color=color)
             # error bar
             ymin, ymax = plt.ylim()
             ylow = ymax / 3
@@ -120,8 +122,8 @@ def plots(name2workload, mode, outpath=None):
             x_std = torch.std(x)
             ax.errorbar(x=x_mean, y=y, xerr=x_std, capsize=5, capthick=3, color=color)
         elif mode == "input":
-            x = timax / torch.sum(tinput, dim=1)
-            ax.hist(x, bins=100, label=label, alpha = 0.6, color=color)
+            x = timax / torch.sum(tinput, dim=1) * 4
+            ax.hist(x, bins=num_bins, label=label, alpha = 0.6, color=color)
             # error bar 
             ymin, ymax = plt.ylim()
             ylow = ymax / 3
