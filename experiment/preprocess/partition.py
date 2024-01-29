@@ -1,5 +1,6 @@
 from preprocess.PyTorchMetis.pytorch_metis import expand_indptr, make_sym, compact_indptr, metis_assignment
 import torch, os, time
+import gc
 
 class Timer:
     def __init__(self):
@@ -71,18 +72,26 @@ def load_metis_graph(config:Config, node_mode: str, edge_mode: str):
     print(f"load graph topology in {timer.duration()} secs", flush=True)
     timer.reset()
     degree = indptr[1:] - indptr[:-1]
+    
+    edge_pruned = False
     if load_edge_weight:
         # print("prunning edges")
         flag = edge_weight > 0
-        indices = indices[flag].clone()
-        edge_weight = edge_weight[flag].clone()
-        indptr = compact_indptr(indptr, flag)
         remain_ratio = flag.sum() / flag.shape[0] * 100
-        e_num = flag.sum()
-        print(f"remove {round(100 - remain_ratio.item())}% edges in {timer.duration()} secs", flush=True)
-        
+        if remain_ratio < 50:
+            ed = False
+            e_num = flag.sum()
+            indices = indices[flag].clone()
+            edge_weight = edge_weight[flag].clone()
+            indptr = compact_indptr(indptr, flag)
+            print(f"remove {round(100 - remain_ratio.item())}% edges in {timer.duration()} secs", flush=True)
+        else:
+            if edge_weight.min() == 0:
+                scale = 10
+                edge_weight = edge_weight * scale + 1 # avoid zero weigths for edge
+                
     timer.reset()
-    if is_sym == False or load_edge_weight:
+    if is_sym == False:
         # remove self edges
         src = expand_indptr(indptr)
         flag = src != indices
@@ -90,9 +99,14 @@ def load_metis_graph(config:Config, node_mode: str, edge_mode: str):
         if load_edge_weight:
             edge_weight = edge_weight[flag].clone()
         indptr = compact_indptr(indptr, flag)
-        print(f"aftre remove self edges in {timer.duration()} secs", flush=True)
+        print(f"remove self edges in {timer.duration()} secs", flush=True)
         indptr, indices, edge_weight = make_sym(indptr, indices, edge_weight)
         print(f"convert graph org_enum={e_num} to sym_enum={indices.shape[0]} in {timer.duration()} secs", flush=True)
+        
+    if is_sym == True and load_edge_weight and edge_pruned:
+        indptr, indices, edge_weight = make_sym(indptr, indices, edge_weight)
+        print(f"convert graph org_enum={e_num} to sym_enum={indices.shape[0]} in {timer.duration()} secs", flush=True)
+
     
     node_weight = None
     if node_mode == "uniform":

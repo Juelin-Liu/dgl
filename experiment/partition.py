@@ -32,7 +32,7 @@ if __name__ == "__main__":
     dir_path = os.path.dirname(os.path.realpath(__file__))
     log_path = os.path.join(dir_path, "logs/exp.csv")
     config = Config(graph_name=graph_name,
-                       world_size=4,
+                       world_size=world_size,
                        num_epoch=num_epoch,
                        fanouts=fanouts,
                        batch_size=batch_size,
