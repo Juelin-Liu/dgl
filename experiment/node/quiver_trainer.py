@@ -55,7 +55,7 @@ def train_quiver_ddp(rank: int, config: Config, quiver_sampler: quiver.pyg.Graph
     e2eTimer = Timer()
     if rank == 0:
         print(config)
-
+    config.in_feat = feat.shape[1]
     dataloader = QuiverDglSageSample(rank, world_size=config.world_size, batch_size=config.batch_size, target_idx=train_idx, sampler=quiver_sampler)
 
     model = None

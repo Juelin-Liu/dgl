@@ -97,14 +97,14 @@ class Config:
                     f"{len(self.fanouts)}x{self.fanouts[0]}_{self.num_redundant_layer}_{self.cache_size}")
 
     def header(self):
-        return ["timestamp","machine_name", "graph_name", "world_size", "num_epoch", "fanouts", "num_redundant_layers", \
+        return ["timestamp","machine_name", "graph_name", "feat_width", "world_size", "num_epoch", "fanouts", "num_redundant_layers", \
                 "batch_size", "system", \
                     "model", "hid_size", "cache_size", "partition_type"]
     
     def content(self):
         connection = "_nvlink" if self.nvlink else "_pcie"
         machine_name = self.machine_name + connection
-        return [pd.Timestamp('now'), machine_name, self.graph_name, self.world_size, self.num_epoch, self.fanouts, self.num_redundant_layer, \
+        return [pd.Timestamp('now'), machine_name, self.graph_name, self.in_feat, self.world_size, self.num_epoch, self.fanouts, self.num_redundant_layer, \
                     self.batch_size, self.system, self.model, self.hid_size, self.cache_size, self.partition_type]
 
     def __repr__(self):
@@ -343,6 +343,17 @@ def load_data(config: Config, is_pinned=False):
         nd_label = pin_memory_inplace(label)
         graph = graph.pin_memory_()
     return graph, feat, label, train_idx, valid_idx, test_idx, num_label
+
+def gather_tensor(intensor:torch.Tensor, row:torch.Tensor):
+    if intensor.device == torch.device("cpu"):
+        assert(intensor.is_pinned())
+        return gather_pinned_tensor_rows(intensor, row)
+    else:
+        return intensor[row]
+
+def get_tensor_size(intensor: torch.Tensor):
+    num_bytes = intensor.element_size() * intensor.nelement()
+    return f"{round(num_bytes / 1e9, 1)}GB"
 
 def log_step(rank, epoch, step, step_per_epoch, timer):
     if rank == 0 and (step % step_per_epoch) % 100 == 0:

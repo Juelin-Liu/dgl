@@ -42,6 +42,7 @@ def train_dgl_ddp(rank: int, config: Config, graph: dgl.DGLGraph, feat: torch.Te
     graph = graph.pin_memory_()    
     sample_config = SampleConfig(rank=rank, batch_size=config.batch_size, world_size=config.world_size, mode=mode, fanouts=config.fanouts)
     dataloader = GraphDataloader(graph, train_idx, sample_config)
+    config.in_feat = feat.shape[1]
 
     model = None
     if config.model == "gat":

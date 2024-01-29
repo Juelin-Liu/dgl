@@ -82,7 +82,7 @@ def bench_p3_batch(configs: list[Config]):
                     fp.write(str(e))
         gc.collect()
         torch.cuda.empty_cache()
-            
+     
 def train_p3_ddp(rank: int, config: Config, graph: dgl.DGLGraph, global_feat: torch.Tensor, label: torch.Tensor, num_label: int, train_idx: torch.Tensor, test_idx: torch.Tensor):
     ddp_setup(rank, config.world_size)
     device = torch.cuda.current_device()
@@ -99,8 +99,14 @@ def train_p3_ddp(rank: int, config: Config, graph: dgl.DGLGraph, global_feat: to
     config.in_feat = feat.shape[1]    
     assert(config.in_feat > 0)
 
-    feat_handle  = pin_memory_inplace(feat)
-    label_handle = pin_memory_inplace(label)
+    if config.graph_name == "orkut":
+        config.cache_size = get_tensor_size(feat)
+        print(f"caching all feature data {config.cache_size} on {device=}")
+        feat = feat.to(device)
+        label = label.to(device)
+    else:
+        feat_handle  = pin_memory_inplace(feat)
+        label_handle = pin_memory_inplace(label)
     graph = graph.pin_memory_()    
     mode = "uva"
 
@@ -150,12 +156,12 @@ def train_p3_ddp(rank: int, config: Config, graph: dgl.DGLGraph, global_feat: to
         handle1 = dist.all_gather(tensor_list=input_node_buffer_lst, tensor=input_nodes, async_op=True)
         handle2 = dist.all_gather(tensor_list=src_edge_buffer_lst, tensor=src, async_op=True)
         handle3 = dist.all_gather(tensor_list=dst_edge_buffer_lst, tensor=dst, async_op=True)
-        batch_label = gather_pinned_tensor_rows(label, output_nodes)
+        batch_label = gather_tensor(label, output_nodes)
 
             
         handle1.wait()
         for r, _input_nodes in enumerate(input_node_buffer_lst):
-            input_feat_buffer_lst[r] = gather_pinned_tensor_rows(feat, _input_nodes)
+            input_feat_buffer_lst[r] = gather_tensor(feat, _input_nodes)
 
         handle2.wait()
         handle3.wait()
@@ -243,12 +249,12 @@ def train_p3_ddp(rank: int, config: Config, graph: dgl.DGLGraph, global_feat: to
             handle2 = dist.all_gather(tensor_list=src_edge_buffer_lst, tensor=src, async_op=True)
             handle3 = dist.all_gather(tensor_list=dst_edge_buffer_lst, tensor=dst, async_op=True)
 
-            batch_label = gather_pinned_tensor_rows(label, output_nodes)
+            batch_label = gather_tensor(label, output_nodes)
 
                 
             handle1.wait()
             for r, _input_nodes in enumerate(input_node_buffer_lst):
-                input_feat_buffer_lst[r] = gather_pinned_tensor_rows(feat, _input_nodes)
+                input_feat_buffer_lst[r] = gather_tensor(feat, _input_nodes)
 
                     
             handle2.wait()
@@ -355,11 +361,11 @@ def train_p3_ddp(rank: int, config: Config, graph: dgl.DGLGraph, global_feat: to
                 handle2 = dist.all_gather(tensor_list=src_edge_buffer_lst, tensor=src, async_op=True)
                 handle3 = dist.all_gather(tensor_list=dst_edge_buffer_lst, tensor=dst, async_op=True)
 
-                batch_label = gather_pinned_tensor_rows(label, output_nodes)
+                batch_label = gather_tensor(label, output_nodes)
                     
                 handle1.wait()
                 for r, _input_nodes in enumerate(input_node_buffer_lst):
-                    input_feat_buffer_lst[r] = gather_pinned_tensor_rows(feat, _input_nodes)
+                    input_feat_buffer_lst[r] = gather_tensor(feat, _input_nodes)
 
                         
                 handle2.wait()
