@@ -133,15 +133,35 @@ class Profiler:
         self.edges_computed_max = 0
         self.edge_skew = 0
         self.run_time = 0
+        self.epoch_num = -1
+        
     def header(self):
         header = ["duration (s)", "sampling (s)", "feature (s)", "forward (s)", "backward (s)",\
                     "allocated (MB)", "reserved (MB)", "test accuracy %", "edges_computed", "edge_skew", "min_edge", "max_edge","run_time"]
         return header
     
+    def set_epoch_num(self, epoch_num):
+        self.epoch_num = epoch_num
+        
     def content(self):
-        content = [self.duration, self.sampling_time, self.feature_time, self.forward_time,\
-                   self.backward_time, self.allocated_mb, self.reserved_mb, self.test_acc, \
-                   self.edges_computed, self.edge_skew, self.edges_computed_min, self.edges_computed_max, self.run_time]
+        assert(self.epoch_num != -1)
+        
+        def avg(t):
+            return round(t / self.epoch_num, 2)
+        
+        content = [avg(self.duration), 
+                   avg(self.sampling_time), 
+                   avg(self.feature_time), 
+                   avg(self.forward_time),
+                   avg(self.backward_time), 
+                   self.allocated_mb, 
+                   self.reserved_mb, 
+                   self.test_acc,
+                   self.edges_computed, 
+                   self.edge_skew, 
+                   self.edges_computed_min, 
+                   self.edges_computed_max, 
+                   self.run_time]
         return content
     
     def __repr__(self):
@@ -223,6 +243,7 @@ def write_to_csv(out_path, configs: list[Config], profilers: list[Profiler]):
         if not has_header:
             writer.writeheader()
         for config, profiler in zip(configs, profilers):
+            profiler.set_epoch_num(config.num_epoch)
             row = get_row(config.header() + profiler.header(), config.content() + profiler.content())
             writer.writerow(row)
     print("Experiment result has been written to: ", out_path)
@@ -295,7 +316,7 @@ def load_topo(config: Config, is_pinned=False):
 
 def get_feat_dim(config: Config):
     if config.graph_name == "orkut":
-        return 1280
+        return 512
     elif config.graph_name == "friendster":
         return 128
     elif config.graph_name == "papers100M":
@@ -345,8 +366,7 @@ def load_data(config: Config, is_pinned=False):
     return graph, feat, label, train_idx, valid_idx, test_idx, num_label
 
 def gather_tensor(intensor:torch.Tensor, row:torch.Tensor):
-    if intensor.device == torch.device("cpu"):
-        assert(intensor.is_pinned())
+    if intensor.is_pinned():
         return gather_pinned_tensor_rows(intensor, row)
     else:
         return intensor[row]

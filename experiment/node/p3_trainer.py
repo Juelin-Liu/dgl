@@ -98,7 +98,8 @@ def train_p3_ddp(rank: int, config: Config, graph: dgl.DGLGraph, global_feat: to
 
     config.in_feat = feat.shape[1]    
     assert(config.in_feat > 0)
-
+    feat_handle = None
+    label_handle = None
     if config.graph_name == "orkut":
         config.cache_size = get_tensor_size(feat)
         print(f"caching all feature data {config.cache_size} on {device=}")
@@ -134,14 +135,16 @@ def train_p3_ddp(rank: int, config: Config, graph: dgl.DGLGraph, global_feat: to
         input_node_buffer_lst.append(torch.zeros(est_node_size, dtype=nid_dtype, device=device))
         src_edge_buffer_lst.append(torch.zeros(est_node_size, dtype=nid_dtype, device=device))
         dst_edge_buffer_lst.append(torch.zeros(est_node_size, dtype=nid_dtype, device=device))
-        global_grad_lst.append(torch.zeros([est_node_size, config.hid_size], dtype=torch.float32, device=device))
-        input_feat_buffer_lst.append(torch.zeros([est_node_size, config.hid_size], dtype=torch.float32, device=device))
+        global_grad_lst.append(torch.zeros([est_node_size, config.hid_size], dtype=torch.float32, device=device, requires_grad=False))
+        input_feat_buffer_lst.append(torch.zeros([est_node_size, config.hid_size], dtype=torch.float32, device=device, requires_grad=False))
 
     shuffle = P3Shuffle.apply
+    
     print(f"preheat model on device: {device}")
     step = 0
     for input_nodes, output_nodes, blocks in dataloader:
-        step += 1        
+        step += 1       
+        print(f"{step=}", flush=True)
         # 2. feature extraction and shuffling
         top_block: dgl.DGLGraph = blocks[0]
         src, dst = top_block.adj_tensors("coo")
@@ -201,13 +204,17 @@ def train_p3_ddp(rank: int, config: Config, graph: dgl.DGLGraph, global_feat: to
         local_optimizer.zero_grad()
         batch_loss.backward()
         
-        global_optimizer.step()
+
+        #global_optimizer.step()
+        torch.cuda.synchronize()
+        dist.barrier()
         for r, global_grad in enumerate(global_grad_lst):
             if r != rank:
                 local_optimizer.zero_grad()
                 local_hid_buffer_lst[r].backward(global_grad)
                 local_optimizer.step()
-                
+        
+        global_optimizer.step()
         torch.cuda.synchronize()
         if step > PREHEAT_STEP:
             dataloader.reset()

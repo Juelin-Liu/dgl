@@ -19,7 +19,8 @@ def bench_quiver_batch(configs: list[Config]):
         assert(config.model == configs[0].model)
     
     device_list = [i for i in range(config.world_size)]
-    quiver.init_p2p(device_list=device_list)    
+    if config.nvlink:
+        quiver.init_p2p(device_list=device_list)    
     
     graph, feat, label, train_idx, valid_idx, test_idx, num_label = load_data(configs[0], is_pinned=False)
     indptr, indices, edges = graph.adj_tensors("csc")
@@ -46,8 +47,8 @@ def bench_quiver_batch(configs: list[Config]):
                 write_to_csv(config.log_path, [config], [empty_profiler()])
                 with open(f"exceptions/{config.get_file_name()}",'w') as fp:
                     fp.write(str(e))
-        gc.collect()
-        torch.cuda.empty_cache()
+        # gc.collect()
+        # torch.cuda.empty_cache()
             
 def train_quiver_ddp(rank: int, config: Config, quiver_sampler: quiver.pyg.GraphSageSampler, feat: quiver.Feature, label: torch.Tensor, num_label: int, train_idx: torch.Tensor, test_idx: torch.Tensor):
     ddp_setup(rank, config.world_size)
@@ -64,10 +65,12 @@ def train_quiver_ddp(rank: int, config: Config, quiver_sampler: quiver.pyg.Graph
     elif config.model == "sage":
         model = Sage(in_feats=feat.shape[1], hid_feats=config.hid_size, num_layers=len(config.fanouts), out_feats=num_label)
     model = model.to(device)
+
+    print("quiver ddp on", device, flush=True)
     model = DDP(model, device_ids=[rank])
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     
-    print(f"pre-heating model on device: {device}")
+    print(f"pre-heating model on device: {device}", flush=True)
     label = label.to(device)
     
     step = 0
@@ -83,8 +86,9 @@ def train_quiver_ddp(rank: int, config: Config, quiver_sampler: quiver.pyg.Graph
         if step > PREHEAT_STEP:
             dataloader.reset()
             break
+        
     dist.barrier()
-    print(f"training model on device: {device}")        
+    print(f"training model on device: {device}", flush=True)        
     timer = Timer()
     sampling_timers = []
     feature_timers = []
@@ -140,8 +144,9 @@ def train_quiver_ddp(rank: int, config: Config, quiver_sampler: quiver.pyg.Graph
     profiler = Profiler(duration=duration, sampling_time=sampling_time, feature_time=feature_time, forward_time=forward_time, backward_time=backward_time, test_acc=0)
     profile_edge_skew(edges_computed, profiler, rank, dist)
     
-    dist.barrier()
-    
+    if rank == 0 and config.test_model_acc==False:
+        write_to_csv(config.log_path, [config], [profiler])
+
     if config.test_model_acc:
         t2 = Timer()
         print(f"testing model accuracy on {device}")
@@ -163,6 +168,5 @@ def train_quiver_ddp(rank: int, config: Config, quiver_sampler: quiver.pyg.Graph
         if rank == 0:
             print(f"test accuracy={acc}% in {t2.duration()} secs")
             
-    if rank == 0:
-        write_to_csv(config.log_path, [config], [profiler])
+
     ddp_exit()
