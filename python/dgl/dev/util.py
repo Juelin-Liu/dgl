@@ -16,9 +16,12 @@ def SetFanout(fanout: list[int]) -> None:
 
 def SampleBatch(seeds: Tensor, replace : bool = False) -> int:
     return _CAPI_SampleBatch(F.to_dgl_nd(seeds), replace)
-    
-def SampleBatches(seeds: Tensor, batch_len: int, replace: bool, batch_layer = 2):
-    return _CAPI_SampleBatches(F.to_dgl_nd(seeds), batch_len, replace, batch_layer)
+
+def UseBitmap(use_bitmap: bool) -> None:
+    return _CAPI_UseBitmap(use_bitmap)
+
+# def SampleBatches(seeds: Tensor, batch_len: int, replace: bool, batch_layer = 2):
+#     return _CAPI_SampleBatches(F.to_dgl_nd(seeds), batch_len, replace, batch_layer)
 
 def GetBlockData(batch_id: int, layer: int):
     data = _CAPI_GetBlockData(batch_id, layer)
