@@ -14,12 +14,14 @@ using namespace dgl::runtime::cuda;
 namespace dgl::dev {
 template <typename IdType>
 void GPUMapEdges(
-    aten::COOMatrix& mat, const runtime::cuda::OrderedHashTable<IdType>& hash, cudaStream_t stream);
+    aten::COOMatrix& mat, const runtime::cuda::OrderedHashTable<IdType>& hash,
+    cudaStream_t stream);
 
 template <typename IdType>
 void GPUMapEdges(
     NDArray in_rows, NDArray ret_row,
-    const runtime::cuda::OrderedHashTable<IdType>& hash_table, cudaStream_t stream);
-}
+    const runtime::cuda::OrderedHashTable<IdType>& hash_table,
+    cudaStream_t stream);
+}  // namespace dgl::dev
 // namespace dgl::dev
 #endif  // DGL_MAP_EDGES_CUH

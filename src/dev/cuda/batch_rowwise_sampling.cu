@@ -105,7 +105,7 @@ std::vector<aten::COOMatrix> CSRRowWiseSamplingUniformBatch(
   const IdType *in_cols;
   int64_t v_num = mat.indptr.NumElements() - 1;
   int64_t num_batches = rows.size();
-  Bitmap bitmap{v_num, ctx};
+  ByteMap bitmap{v_num, ctx};
   if (mat.indptr.IsPinned()) {
     void *ptr = mat.indptr->data;
     CUDA_CALL(cudaHostGetDevicePointer(&ptr, ptr, 0));
