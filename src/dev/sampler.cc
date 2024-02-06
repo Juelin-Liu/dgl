@@ -104,6 +104,6 @@ DGL_REGISTER_GLOBAL("dev._CAPI_GetBlockData")
       int64_t batch_id = args[0];
       int64_t layer = args[1];
       auto sampler = Sampler::Global();
-      *rv = sampler-getBlockData(batch_id, layer);
+      *rv = sampler->getBlockData(batch_id, layer);
     });
 }  // namespace dgl::dev

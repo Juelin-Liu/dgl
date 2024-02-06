@@ -17,10 +17,7 @@
 #include "../runtime/cuda/cuda_hashtable.cuh"
 #include "cuda/bitmap.h"
 #include "cuda/map_edges.cuh"
-// #include "cuda/batch_rowwise_sampling.cuh"
-
 namespace dgl::dev {
-
 struct GraphBatch {
   int64_t _batch_id{-1};
   bool reindexed{false};
@@ -54,12 +51,16 @@ class Sampler {
       int64_t v_num = _csc.indptr.NumElements() - 1;
       DeviceBitmap bitmap(v_num, ctx, false);
       ATEN_ID_TYPE_SWITCH(rows.at(0)->dtype, IdType, {
+        int64_t num_input{0};
         for (auto const &row : rows) {
           bitmap.flag(row.Ptr<IdType>(), row.NumElements());
+          num_input += row.NumElements();
         }
         int64_t num_item = bitmap.numItem();
+//        LOG(INFO) << "num item in bitmap: " << num_item;
         NDArray ret = NDArray::Empty({num_item}, dtype, ctx);
-        bitmap.unique(ret.Ptr<IdType>());
+//        NDArray ret = NDArray::Empty({num_input}, dtype, ctx);
+        int64_t num_unique = bitmap.unique(ret.Ptr<IdType>());
         return ret;
       });
     } else {
@@ -85,7 +86,6 @@ class Sampler {
         device->StreamSync(ctx, stream);
       });
       return unique.CreateView({h_num_item}, arr->dtype);
-      // LOG(INFO) << "num_input: " << num_input << " num_unique: " << h_num_item;
     }
   }
 

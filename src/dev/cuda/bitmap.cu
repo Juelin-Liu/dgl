@@ -203,16 +203,14 @@ DeviceBitmap::DeviceBitmap(int64_t num_elems, DGLContext ctx, bool allow_remap) 
   auto stream = runtime::getCurrentCUDAStream();
 
   _bitmap = static_cast<Bucket *>(device->AllocWorkspace(ctx, _num_buckets * sizeof(Bucket)));
-  CUDA_CALL(cudaMemsetAsync(&_bitmap, 0, _num_buckets * sizeof(Bucket), stream));
+  CUDA_CALL(cudaMemsetAsync(_bitmap, 0, _num_buckets * sizeof(Bucket), stream));
   if (_allow_remap) {
     _offset = static_cast<Bucket *>(device->AllocWorkspace(ctx, (_num_buckets + 1) * sizeof(Offset)));
-    CUDA_CALL(cudaMemsetAsync(&_offset, 0, (_num_buckets + 1) * sizeof(Bucket), stream));
+    CUDA_CALL(cudaMemsetAsync(_offset, 0, (_num_buckets + 1) * sizeof(Bucket), stream));
   }
 }
 
 DeviceBitmap::~DeviceBitmap() {
-//  if (_bitmap) cudaFree(_bitmap);
-//  if (_offset) cudaFree(_offset);
   auto device = runtime::DeviceAPI::Get(_ctx);
 
   if (_bitmap) device->FreeWorkspace(_ctx, _bitmap);
@@ -222,8 +220,8 @@ DeviceBitmap::~DeviceBitmap() {
 void DeviceBitmap::reset() {
   auto device = runtime::DeviceAPI::Get(_ctx);
   auto stream = runtime::getCurrentCUDAStream();
-  cudaMemsetAsync(&_bitmap, 0, _num_buckets * sizeof(Bucket), stream);
-  if(_allow_remap) cudaMemsetAsync(&_offset, 0, (_num_buckets + 1) * sizeof(Bucket), stream);
+  cudaMemsetAsync(_bitmap, 0, _num_buckets * sizeof(Bucket), stream);
+  if(_allow_remap) cudaMemsetAsync(_offset, 0, (_num_buckets + 1) * sizeof(Bucket), stream);
   device->StreamSync(_ctx, stream);
   _num_flagged = 0;
 }
@@ -237,8 +235,7 @@ void DeviceBitmap::flag(const IdType *row, int64_t num_rows) {
   const dim3 grid((num_rows + block.x - 1) / block.x);
   DeviceBitIterator iter(_bitmap, _num_buckets, 0);
   CUDA_KERNEL_CALL(impl::flag_kernel, grid, block, 0, stream, iter, row, num_rows);
-//  impl::flag_kernel<<<grid, block, 0>>>(iter, row, num_rows);
-//  device->StreamSync(_ctx, stream);
+//  device->(_ctx, stream);
   _build_map = false;
 }
 
@@ -251,7 +248,6 @@ int64_t DeviceBitmap::buildMap() {
   const dim3 grid((_num_buckets + block.x - 1) / block.x);
   DeviceBitIterator iter(_bitmap, _num_buckets, 0);
   CUDA_KERNEL_CALL(impl::popcnt_kernel, grid, block, 0, stream, iter, _num_buckets, _offset);
-//  impl::popcnt_kernel<<<grid, block, 0>>>(iter, _num_buckets, _offset);
 
   void *d_temp_storage = nullptr;
   size_t temp_storage_bytes = 0;
@@ -293,42 +289,31 @@ template <typename IdType>
 int64_t DeviceBitmap::unique(IdType *out_row) const {
   auto device = runtime::DeviceAPI::Get(_ctx);
   auto stream = runtime::getCurrentCUDAStream();
-  // adopted from cub
-  // Declare, allocate, and initialize device-accessible pointers for input,
-  // flags, and output
+
   int num_items = _num_buckets * sizeof(Bucket) * 8;
   auto d_in =
-      cub::CountingInputIterator<IdType>(0);  // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
+      cub::CountingInputIterator<IdType>(0);
   DeviceBitIterator d_flags(
-      _bitmap, _num_buckets, 0);  // e.g., [1, 0, 0, 1, 0, 1, 1, 0]
-  IdType *d_out = out_row;        // e.g., [ ,  ,  ,  ,  ,  ,  ,  ]
+      _bitmap, _num_buckets, 0);
+  IdType *d_out = out_row;
   int64_t *d_num_selected_out = static_cast<int64_t *>(device->AllocWorkspace(_ctx, sizeof(int64_t)));
-//  cudaMalloc(&d_num_selected_out, sizeof(int64_t));
-  // Determine temporary device storage requirements
   void *d_temp_storage = NULL;
   size_t temp_storage_bytes = 0;
   CUDA_CALL(cub::DeviceSelect::Flagged(
       d_temp_storage, temp_storage_bytes, d_in, d_flags, d_out,
       d_num_selected_out, num_items, stream));
   device->StreamSync(_ctx, stream);
-  // Allocate temporary storage
-//  cudaMalloc(&d_temp_storage, temp_storage_bytes);
   d_temp_storage = device->AllocWorkspace(_ctx, temp_storage_bytes);
   // Run selection
   CUDA_CALL(cub::DeviceSelect::Flagged(
       d_temp_storage, temp_storage_bytes, d_in, d_flags, d_out,
       d_num_selected_out, num_items, stream));
-  // d_out                 <-- [1, 4, 6, 7]
-  // d_num_selected_out    <-- [4]
   int64_t h_num_selected_out{0};
   cudaDeviceSynchronize();
   CUDA_CALL(cudaMemcpyAsync(
       &h_num_selected_out, d_num_selected_out, sizeof(int64_t),
       cudaMemcpyDefault, stream));
-//  cudaFree(d_num_selected_out);
-//  cudaDeviceSynchronize();
   device->StreamSync(_ctx, stream);
-  assert(h_num_selected_out == _num_flagged);
   device->FreeWorkspace(_ctx, d_temp_storage);
   device->FreeWorkspace(_ctx, d_num_selected_out);
   return h_num_selected_out;
@@ -343,8 +328,6 @@ void DeviceBitmap::map(const IdType *row, int64_t num_rows, IdType *out_row) con
   const dim3 grid((num_rows + block.x - 1) / block.x);
   DeviceBitIterator iter(_bitmap, _num_buckets, 0);
   CUDA_KERNEL_CALL(impl::map_kernel, grid, block, 0, stream, iter, _offset, row, num_rows, out_row);
-//  impl::map_kernel<<<grid, block, 0>>>(iter, _offset, row, num_rows, out_row);
-//  cudaDeviceSynchronize();
   device->StreamSync(_ctx, stream);
 };
 
