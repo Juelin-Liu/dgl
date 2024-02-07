@@ -6,6 +6,7 @@
 #define DGL_BITMAP_H
 
 #include <dgl/runtime/device_api.h>
+#include <dgl/array.h>
 
 #include <cassert>
 #include <cstdint>
@@ -13,15 +14,15 @@
 #include <iterator>
 
 namespace dgl::dev {
-typedef int32_t Bucket;
-typedef uint32_t Offset;
+typedef int32_t BucketType;
+typedef uint32_t OffsetType;
 class DeviceBitmap {
  private:
-  Bucket* _bitmap{nullptr};  // 1 if mapped 0 otherwise
-  Offset* _offset{nullptr};  // used for fast indexing during mapping
+  BucketType* _bitmap{nullptr};  // 1 if mapped 0 otherwise
+  OffsetType* _offset{nullptr};  // used for fast indexing during mapping
   DGLContext _ctx{};
-  int64_t _num_flagged{0};
-  int64_t _num_buckets{0};
+  uint32_t _num_buckets{0};
+  uint32_t _compress_ratio{1}; // number of 32-bit buckets grouped per offset
   bool _allow_remap{true};
   bool _build_map{false};
 

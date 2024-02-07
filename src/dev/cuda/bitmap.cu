@@ -5,15 +5,18 @@
 
 #include "../../runtime/cuda/cuda_common.h"
 #include "bitmap.h"
+#include <dgl/runtime/tensordispatch.h>
+
 #define BucketWidth 32
 #define BucketHighestBit 0x80000000  // 1000,0000,0000,0000,...,0000 in binary
+using TensorDispatcher = dgl::runtime::TensorDispatcher;
 
 namespace dgl::dev {
 
 class DeviceBitIterator
     : public std::iterator<std::random_access_iterator_tag, bool> {
  private:
-  Bucket *_bitmap{nullptr};
+  BucketType *_bitmap{nullptr};
   uint32_t _num_buckets{0};
   uint32_t _offset{0};
 
@@ -22,7 +25,8 @@ class DeviceBitIterator
   using value_type = bool;
 
   __host__ __device__
-  DeviceBitIterator(Bucket *bitmap, uint32_t num_buckets, uint32_t offset = 0)
+  DeviceBitIterator(
+      BucketType *bitmap, uint32_t num_buckets, uint32_t offset = 0)
       : _bitmap{bitmap},
         _num_buckets{num_buckets},
         _offset{offset} {
@@ -46,9 +50,9 @@ class DeviceBitIterator
 
   __host__ __device__ __forceinline__ bool operator*() const {
     const int64_t bucket_idx = _offset / BucketWidth;
-    const Bucket shift = _offset % BucketWidth;
-    const Bucket mask = BucketHighestBit >> shift;
-    const Bucket flag = _bitmap[bucket_idx];
+    const BucketType shift = _offset % BucketWidth;
+    const BucketType mask = BucketHighestBit >> shift;
+    const BucketType flag = _bitmap[bucket_idx];
     bool retval = (flag & mask);
     // printf("operator*() flag %d shift %d mask %d offset %ld ret %d\n", flag,
     // shift, mask, _offset, retval);
@@ -90,9 +94,9 @@ class DeviceBitIterator
   template <typename Distance>
   __host__ __device__ __forceinline__ value_type operator[](Distance n) const {
     const int64_t bucket_idx = (_offset + n) / BucketWidth;
-    const Bucket shift = (_offset + n) % BucketWidth;
-    const Bucket mask = BucketHighestBit >> shift;
-    const Bucket flag = _bitmap[bucket_idx];
+    const BucketType shift = (_offset + n) % BucketWidth;
+    const BucketType mask = BucketHighestBit >> shift;
+    const BucketType flag = _bitmap[bucket_idx];
     bool retval = (flag & mask);
     // printf("operator[] n %d flag %d shift %d mask %d offset %ld ret %d\n", n,
     // flag, shift, mask, _offset, retval);
@@ -103,24 +107,24 @@ class DeviceBitIterator
   __device__ __forceinline__ void flag(Distance n) {
     assert(n < _num_buckets * BucketWidth);
     const int64_t bucket_idx = (_offset + n) / BucketWidth;
-    const Bucket shift = (_offset + n) % BucketWidth;
-    const Bucket mask = BucketHighestBit >> shift;
+    const BucketType shift = (_offset + n) % BucketWidth;
+    const BucketType mask = BucketHighestBit >> shift;
     atomicOr(_bitmap + bucket_idx, mask);
     // printf("flag n %ld shift %d mask %d offset %ld bitmap %d\n", n, shift,
     // mask, _offset, _bitmap[bucket_idx]);
   }
 
   template <typename Distance>
-  __device__ __forceinline__ Bucket popcnt(Distance bucket_idx) const {
+  __device__ __forceinline__ BucketType popcnt(Distance bucket_idx) const {
     return __popc(_bitmap[bucket_idx]);
   }
 
   template <typename Distance>
-  __device__ __forceinline__ Bucket
+  __device__ __forceinline__ BucketType
   popcnt(Distance bucket_idx, Distance num_bits) const {
     const int shift = BucketWidth - num_bits;
-    const Bucket bitmap = _bitmap[bucket_idx];
-    const Bucket mask = (bitmap >> shift) << shift;
+    const BucketType bitmap = _bitmap[bucket_idx];
+    const BucketType mask = (bitmap >> shift) << shift;
     const auto retval = __popc(mask);
     // printf("popcnt bucket_idx %ld num_bits %ld retval %d bitmap %d shift %d
     // mask %d\n", bucket_idx, num_bits, retval, bitmap, shift, mask);
@@ -150,7 +154,7 @@ __global__ void flag_kernel(
 }
 
 __global__ void popcnt_kernel(
-    DeviceBitIterator iter, int64_t num_buckets, Offset *offset) {
+    DeviceBitIterator iter, int64_t num_buckets, OffsetType *offset) {
   const int64_t tIdx = threadIdx.x + blockIdx.x * blockDim.x;
   if (tIdx < num_buckets) {
     offset[tIdx] = iter.popcnt(tIdx);
@@ -174,7 +178,7 @@ __global__ void cnt_kernel(
 
 template <typename IdType>
 __global__ void map_kernel(
-    DeviceBitIterator iter, const Offset *offset, const IdType *row,
+    DeviceBitIterator iter, const OffsetType *offset, const IdType *row,
     int64_t num_rows, IdType *out_row) {
   const int64_t tIdx = threadIdx.x + blockIdx.x * blockDim.x;
   if (tIdx < num_rows) {
@@ -182,7 +186,7 @@ __global__ void map_kernel(
     assert(iter[id] == true);
     const int64_t bucket_idx = id / BucketWidth;
     const int64_t num_bits = id % BucketWidth + 1;
-    Offset start = offset[bucket_idx];
+    OffsetType start = offset[bucket_idx];
     const IdType loc_id = start + iter.popcnt(bucket_idx, num_bits);
     out_row[tIdx] = loc_id;
     // printf("tIdx: %lld start %d loc_id: %d num_bits: %d\n", tIdx, start,
@@ -202,13 +206,13 @@ __global__ void read_kernel(DeviceBitIterator iter, int64_t num_items) {
 // output: the indices in bitmap marked as 1
 template <typename IdType>
 __global__ void unique_kernel(
-    const Bucket *bitmap, int64_t num_buckets, Offset *offset,
+    const BucketType *bitmap, int64_t num_buckets, OffsetType *offset,
     IdType *out_row) {
   assert(offset != nullptr);
   const int64_t tIdx = threadIdx.x + blockIdx.x * blockDim.x;
   if (tIdx < num_buckets) {
-    const Offset start = offset[tIdx];
-    Bucket bits = bitmap[tIdx];
+    const OffsetType start = offset[tIdx];
+    BucketType bits = bitmap[tIdx];
     int cnt = 0;
     while (bits != 0) {
       const int lz = __clz(bits);
@@ -223,21 +227,21 @@ __global__ void unique_kernel(
 DeviceBitmap::DeviceBitmap(
     int64_t num_elems, DGLContext ctx, bool allow_remap) {
   _allow_remap = allow_remap;
-  int64_t bucket_bits = sizeof(Bucket) * 8;
+  int64_t bucket_bits = sizeof(BucketType) * 8;
   _num_buckets =
       (num_elems + bucket_bits - 1) / bucket_bits;  // 32 bits per buckets
   _ctx = ctx;
   auto device = runtime::DeviceAPI::Get(_ctx);
   auto stream = runtime::getCurrentCUDAStream();
-
-  _bitmap = static_cast<Bucket *>(
-      device->AllocWorkspace(ctx, _num_buckets * sizeof(Bucket)));
-  CUDA_CALL(cudaMemsetAsync(_bitmap, 0, _num_buckets * sizeof(Bucket), stream));
+  _bitmap = static_cast<BucketType *>(
+      device->AllocWorkspace(ctx, _num_buckets * sizeof(BucketType)));
+  CUDA_CALL(cudaMemsetAsync(_bitmap, 0, _num_buckets * sizeof(BucketType), stream));
   if (_allow_remap) {
-    _offset = static_cast<Offset *>(device->AllocWorkspace(ctx, (_num_buckets + 1) * sizeof(Offset)));
+    _offset = static_cast<OffsetType *>(device->AllocWorkspace(ctx, (_num_buckets + 1) * sizeof(OffsetType)));
     CUDA_CALL(cudaMemsetAsync(
-        _offset, 0, (_num_buckets + 1) * sizeof(Bucket), stream));
+        _offset, 0, (_num_buckets + 1) * sizeof(BucketType), stream));
   }
+
 }
 
 DeviceBitmap::~DeviceBitmap() {
@@ -250,11 +254,10 @@ DeviceBitmap::~DeviceBitmap() {
 void DeviceBitmap::reset() {
   auto device = runtime::DeviceAPI::Get(_ctx);
   auto stream = runtime::getCurrentCUDAStream();
-  cudaMemsetAsync(_bitmap, 0, _num_buckets * sizeof(Bucket), stream);
+  cudaMemsetAsync(_bitmap, 0, _num_buckets * sizeof(BucketType), stream);
   if (_allow_remap)
-    cudaMemsetAsync(_offset, 0, (_num_buckets + 1) * sizeof(Bucket), stream);
+    cudaMemsetAsync(_offset, 0, (_num_buckets + 1) * sizeof(BucketType), stream);
   device->StreamSync(_ctx, stream);
-  _num_flagged = 0;
 }
 
 template <typename IdType>
@@ -291,16 +294,25 @@ int64_t DeviceBitmap::buildMap() {
   //  cudaMalloc(&d_temp_storage, temp_storage_bytes);
   d_temp_storage = device->AllocWorkspace(_ctx, temp_storage_bytes);
 
+  NDArray new_len_tensor;
+  if (TensorDispatcher::Global()->IsAvailable()) {
+    new_len_tensor = NDArray::PinnedEmpty(
+        {1}, DGLDataTypeTraits<OffsetType>::dtype, DGLContext{kDGLCPU, 0});
+  } else {
+    // use pageable memory, it will unecessarily block but be functional
+    new_len_tensor = NDArray::Empty(
+        {1}, DGLDataTypeTraits<OffsetType>::dtype, DGLContext{kDGLCPU, 0});
+  }
   CUDA_CALL(cub::DeviceScan::ExclusiveSum(
       d_temp_storage, temp_storage_bytes, d_in, d_out, num_items, stream));
   CUDA_CALL(cudaMemcpyAsync(
-      &_num_flagged, _offset + _num_buckets, sizeof(Offset), cudaMemcpyDefault,
+      new_len_tensor.Ptr<OffsetType>(), _offset + _num_buckets, sizeof(OffsetType), cudaMemcpyDefault,
       stream));
 
   device->StreamSync(_ctx, stream);
   device->FreeWorkspace(_ctx, d_temp_storage);
   _build_map = true;
-  return _num_flagged;
+  return new_len_tensor.Ptr<OffsetType>()[0];
 }
 
 int64_t DeviceBitmap::numItem() const {
@@ -376,10 +388,20 @@ int64_t DeviceBitmap::unique(IdType *out_row) {
   //  cudaMalloc(&d_temp_storage, temp_storage_bytes);
   d_temp_storage = device->AllocWorkspace(_ctx, temp_storage_bytes);
 
+  NDArray new_len_tensor;
+  if (TensorDispatcher::Global()->IsAvailable()) {
+    new_len_tensor = NDArray::PinnedEmpty(
+        {1}, DGLDataTypeTraits<OffsetType>::dtype, DGLContext{kDGLCPU, 0});
+  } else {
+    // use pageable memory, it will unecessarily block but be functional
+    new_len_tensor = NDArray::Empty(
+        {1}, DGLDataTypeTraits<OffsetType>::dtype, DGLContext{kDGLCPU, 0});
+  }
+
   CUDA_CALL(cub::DeviceScan::ExclusiveSum(
       d_temp_storage, temp_storage_bytes, d_in, d_out, num_items, stream));
   CUDA_CALL(cudaMemcpyAsync(
-      &_num_flagged, _offset + _num_buckets, sizeof(Offset), cudaMemcpyDefault,
+      new_len_tensor.Ptr<OffsetType>(), _offset + _num_buckets, sizeof(OffsetType), cudaMemcpyDefault,
       stream));
 
   _build_map = true;
@@ -387,7 +409,7 @@ int64_t DeviceBitmap::unique(IdType *out_row) {
   CUDA_KERNEL_CALL(impl::unique_kernel, grid, block, 0, stream, _bitmap, _num_buckets, _offset, out_row);
   device->StreamSync(_ctx, stream);
   device->FreeWorkspace(_ctx, d_temp_storage);
-  return _num_flagged;
+  return new_len_tensor.Ptr<OffsetType>()[0];
 };
 
 template <typename IdType>

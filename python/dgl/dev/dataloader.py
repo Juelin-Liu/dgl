@@ -1,7 +1,10 @@
 from .util import *
 from dataclasses import dataclass
-from torch.utils.data import DataLoader
+# from torch.utils.data import DataLoader
 from torch.cuda import device_count
+from torch import randperm, device
+import torch.cuda.nvtx as nvtx
+
 from .. import DGLGraph
 @dataclass
 class SampleConfig:
@@ -24,7 +27,39 @@ class SampleConfig:
                 self.reindex,
                 self.fanouts
                 ]
+
+class DataLoader:
+    def __init__(self, target_idx: Tensor, batch_size: int, shuffle:bool, drop_last=bool):
+        assert(target_idx.device != device("cpu"))
+        self.nids = target_idx
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+        self.drop_last = drop_last
+        self.cur_idx = 0
         
+    def __iter__(self):
+        self.cur_idx = 0
+        if self.shuffle:
+            print("start shuffling")
+            idx = randperm(self.nids.shape[0])
+            self.nids = self.nids[idx].clone()
+        return self
+
+    def __next__(self):
+        if self.drop_last:
+            if self.cur_idx + self.batch_size < self.nids.shape[0]:
+                seeds = self.nids[self.cur_idx : self.cur_idx + self.batch_size]
+                self.cur_idx += self.batch_size
+                return seeds
+            else:
+                raise StopIteration
+        elif self.cur_idx < self.nids.shape[0] - 1:
+            seeds = self.nids[self.cur_idx : self.cur_idx + self.batch_size]
+            self.cur_idx += self.batch_size
+            return seeds
+        else:
+            raise StopIteration
+    
 class GraphDataloader:
     def __init__(self, g: DGLGraph, target_idx: Tensor, config: SampleConfig):
         assert(config.mode in ["uva", "gpu"])
@@ -41,7 +76,11 @@ class GraphDataloader:
                 
         self.global_target_idx = target_idx
         self.target_idx = target_idx[config.rank*self.loc_idx_size:(config.rank+1) * self.loc_idx_size].clone().to(self.device)
-        self.idx_loader = DataLoader(self.target_idx.to(self.device), batch_size=self.batch_size, drop_last=config.drop_last)
+        self.idx_loader = DataLoader(target_idx=self.target_idx, 
+                                     batch_size=self.batch_size, 
+                                     drop_last=config.drop_last, 
+                                     shuffle=True)
+        
         self.iter = iter(self.idx_loader)
         self.config = config
     
@@ -67,7 +106,16 @@ class GraphDataloader:
         return self
     
     def __next__(self) -> (Tensor, Tensor, list[DGLBlock]):
+        nvtx.range_push("start next")
         seeds = next(self.iter)
+        nvtx.range_pop()
+        
+        nvtx.range_push("start sampling")
         batch_id = SampleBatch(seeds, self.replace)
-        return GetBlocks(batch_id, reindex=self.reindex, layers=len(self.fanouts))
+        nvtx.range_pop()
+        
+        nvtx.range_push("create block")
+        ret = GetBlocks(batch_id, reindex=self.reindex, layers=len(self.fanouts))
+        nvtx.range_pop()
+        return ret
     
