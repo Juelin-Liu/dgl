@@ -5,14 +5,15 @@
 #ifndef DGL_BITMAP_H
 #define DGL_BITMAP_H
 
+#include <dgl/runtime/device_api.h>
+
+#include <cassert>
 #include <cstdint>
 #include <iostream>
 #include <iterator>
-#include <cassert>
-#include <dgl/runtime/device_api.h>
 
 namespace dgl::dev {
-typedef uint32_t Bucket;
+typedef int32_t Bucket;
 typedef uint32_t Offset;
 class DeviceBitmap {
  private:
@@ -23,6 +24,7 @@ class DeviceBitmap {
   int64_t _num_buckets{0};
   bool _allow_remap{true};
   bool _build_map{false};
+
  public:
   DeviceBitmap(int64_t num_elems, DGLContext ctx, bool allow_remap);
   ~DeviceBitmap();
@@ -54,7 +56,7 @@ class DeviceBitmap {
      as 1
   */
   template <typename IdType>
-  int64_t unique(IdType* d_out_row) const;
+  int64_t unique(IdType* d_out_row);
 
   /**
       @params: IdType: type of the input and output row

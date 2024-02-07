@@ -38,30 +38,30 @@ class Sampler {
   aten::CSRMatrix _csc;
   std::vector<int64_t> _fanouts;
   std::deque<std::shared_ptr<GraphBatch>> _batches;
-  int64_t _pool_size{1};
   int64_t _next_id{0};
   bool _use_bitmap{false};
 
   // return the unique elements in the arr
   NDArray getUnique(const std::vector<NDArray> &rows) const {
     if (_use_bitmap) {
-      CHECK(rows.size() > 0);
+      CHECK(!rows.empty());
       auto ctx = rows.at(0)->ctx;
       auto dtype = rows.at(0)->dtype;
       int64_t v_num = _csc.indptr.NumElements() - 1;
-      DeviceBitmap bitmap(v_num, ctx, false);
+      DeviceBitmap bitmap(v_num, ctx, true);
       ATEN_ID_TYPE_SWITCH(rows.at(0)->dtype, IdType, {
         int64_t num_input{0};
         for (auto const &row : rows) {
           bitmap.flag(row.Ptr<IdType>(), row.NumElements());
           num_input += row.NumElements();
         }
-        int64_t num_item = bitmap.numItem();
-//        LOG(INFO) << "num item in bitmap: " << num_item;
-        NDArray ret = NDArray::Empty({num_item}, dtype, ctx);
-//        NDArray ret = NDArray::Empty({num_input}, dtype, ctx);
+//        int64_t num_item = bitmap.numItem();
+//        NDArray ret = NDArray::Empty({num_item}, dtype, ctx);
+        NDArray ret = NDArray::Empty({num_input}, dtype, ctx);
         int64_t num_unique = bitmap.unique(ret.Ptr<IdType>());
-        return ret;
+//        LOG(INFO) << "num inputs: " << num_input << " num unique: " << num_unique << " ratio: " << 1.0 * num_unique / num_input;
+        return ret.CreateView({num_unique}, dtype);
+//        return ret;
       });
     } else {
       NDArray arr = aten::Concat(rows);
@@ -115,7 +115,7 @@ class Sampler {
   }
 
   void setFanouts(std::vector<int64_t> fanouts) {
-    _fanouts = fanouts;
+    _fanouts = std::move(fanouts);
     _next_id = 0;
   }
 
@@ -131,7 +131,7 @@ class Sampler {
    * seeds: the root vertex to be sampled from the graph
    * replace: use replace sampling or not
    */
-  int64_t sampleOneBatch(NDArray seeds, bool replace) {
+  int64_t sampleOneBatch(const NDArray& seeds, bool replace) {
     CHECK(seeds.IsPinned() || seeds->ctx.device_type != DGLDeviceType::kDGLCPU)
         << "Seeds must be pinned or in GPU memory";
     //    while (_batches.size() >= _pool_size) _batches.pop_front();
@@ -160,7 +160,7 @@ class Sampler {
     CHECK(layer < _fanouts.size());
     std::shared_ptr<GraphBatch> batch{nullptr};
     bool found = false;
-    for (auto ptr : _batches) {
+    for (const auto& ptr : _batches) {
       if (ptr->_batch_id == batch_id) {
         batch = ptr;
         found = true;
@@ -171,17 +171,17 @@ class Sampler {
                  << " is not found in the pool";
     CHECK(batch->_blocks.size() == _fanouts.size());
     if (should_reindex && !batch->reindexed) {
-      auto allnodes = batch->_frontiers.at(_fanouts.size());
-      ATEN_ID_TYPE_SWITCH(allnodes->dtype, IdType, {
-        int64_t num_input = allnodes.NumElements();
-        auto ctx = allnodes->ctx;
+      auto all_nodes = batch->_frontiers.at(_fanouts.size());
+      ATEN_ID_TYPE_SWITCH(all_nodes->dtype, IdType, {
+        int64_t num_input = all_nodes.NumElements();
+        auto ctx = all_nodes->ctx;
         auto stream = runtime::getCurrentCUDAStream();
         if (_use_bitmap) {
           int64_t v_num = _csc.indptr.NumElements() - 1;
           DeviceBitmap bitmap(v_num, ctx, true);
-          bitmap.flag(allnodes.Ptr<IdType>(), allnodes.NumElements());
+          bitmap.flag(all_nodes.Ptr<IdType>(), all_nodes.NumElements());
           int64_t num_mapped = bitmap.buildMap();
-          CHECK_EQ(num_mapped, allnodes.NumElements());
+          CHECK_EQ(num_mapped, num_input);
           for (auto &block: batch->_blocks) {
             bitmap.map(block.col.Ptr<IdType>(), block.col.NumElements(), block.col.Ptr<IdType>());
             bitmap.map(block.row.Ptr<IdType>(), block.row.NumElements(), block.row.Ptr<IdType>());
@@ -189,7 +189,7 @@ class Sampler {
         } else {
           auto hash_table =
               runtime::cuda::OrderedHashTable<IdType>(num_input, ctx, stream);
-          hash_table.FillWithUnique(allnodes.Ptr<IdType>(), num_input, stream);
+          hash_table.FillWithUnique(all_nodes.Ptr<IdType>(), num_input, stream);
           for (auto &block : batch->_blocks) {
             GPUMapEdges<IdType>(block, hash_table, stream);
           }
@@ -216,7 +216,7 @@ class Sampler {
   NDArray getInputNode(int64_t batch_id) {
     std::shared_ptr<GraphBatch> batch{nullptr};
     bool found = false;
-    for (auto ptr : _batches) {
+    for (const auto& ptr : _batches) {
       if (ptr->_batch_id == batch_id) {
         batch = ptr;
         found = true;
@@ -231,7 +231,7 @@ class Sampler {
   NDArray getOutputNode(int64_t batch_id) {
     std::shared_ptr<GraphBatch> batch{nullptr};
     bool found = false;
-    for (auto ptr : _batches) {
+    for (const auto& ptr : _batches) {
       if (ptr->_batch_id == batch_id) {
         batch = ptr;
         found = true;
@@ -240,13 +240,13 @@ class Sampler {
     }
     CHECK(found) << "GetOutputNode batch id " << batch_id
                  << " is not found in the pool";
-    CHECK(batch->_frontiers.size() >= 1);
+    CHECK(!batch->_frontiers.empty());
     return batch->_frontiers.at(0);
   }
   NDArray getBlockData(int64_t batch_id, int64_t layer) {
     std::shared_ptr<GraphBatch> batch{nullptr};
     bool found = false;
-    for (auto ptr : _batches) {
+    for (const auto& ptr : _batches) {
       if (ptr->_batch_id == batch_id) {
         batch = ptr;
         found = true;
