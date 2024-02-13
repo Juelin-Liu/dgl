@@ -28,13 +28,6 @@ DGL_REGISTER_GLOBAL("dev._CAPI_SetFanout")
       sampler->setFanouts(fanouts);
     });
 
-//DGL_REGISTER_GLOBAL("dev._CAPI_SetPoolSize")
-//    .set_body([](DGLArgs args, DGLRetValue *rv) {
-//      int64_t pool_size = args[0];
-//      auto sampler = Sampler::Global();
-//      sampler->SetPoolSize(pool_size);
-//    });
-
 DGL_REGISTER_GLOBAL("dev._CAPI_UseBitmap")
     .set_body([](DGLArgs args, DGLRetValue *rv) {
       bool use_bitmap = args[0];
@@ -49,32 +42,6 @@ DGL_REGISTER_GLOBAL("dev._CAPI_SampleBatch")
       auto sampler = Sampler::Global();
       *rv = sampler->sampleOneBatch(seeds, replace);
     });
-
-// DGL_REGISTER_GLOBAL("dev._CAPI_SampleBatches")
-//     .set_body([](DGLArgs args, DGLRetValue *rv) {
-//       NDArray seed_arr = args[0];
-//       const int64_t arr_len = seed_arr.NumElements();
-//       const int64_t slice_len = args[1];
-//       const bool replace = args[2];
-//       const int64_t batch_layer = args[3];
-//       auto sampler = Sampler::Global();
-//       std::vector<NDArray> seeds;
-//       int64_t offset = 0;
-//       while (offset < arr_len) {
-//         int64_t start = offset;
-//         int64_t end = std::min(offset + slice_len, arr_len);
-//         int64_t view_len = end - start;
-//         seeds.push_back(seed_arr.CreateView({view_len}, seed_arr->dtype,
-//         offset)); offset = end;
-//       }
-//
-//       int64_t num_elem = 0;
-//       for (const auto& seed: seeds) {
-//         num_elem += seed.NumElements();
-//       }
-//       CHECK_EQ(num_elem, arr_len);
-//       *rv = sampler->SampleBatches(seeds, replace, batch_layer);
-//     });
 
 DGL_REGISTER_GLOBAL("dev._CAPI_GetBlock")
     .set_body([](DGLArgs args, DGLRetValue *rv) {

@@ -5,8 +5,8 @@
 #ifndef DGL_BITMAP_H
 #define DGL_BITMAP_H
 
-#include <dgl/runtime/device_api.h>
 #include <dgl/array.h>
+#include <dgl/runtime/device_api.h>
 
 #include <cassert>
 #include <cstdint>
@@ -22,13 +22,19 @@ class DeviceBitmap {
   OffsetType* _offset{nullptr};  // used for fast indexing during mapping
   DGLContext _ctx{};
   uint32_t _num_buckets{0};
-  uint32_t _compress_ratio{1}; // number of 32-bit buckets grouped per offset
-  bool _allow_remap{true};
-  bool _build_map{false};
+  uint32_t _num_offset{0};
+  uint32_t _comp_ratio{4};  // number of 32-bit buckets counted per offset
+  uint32_t _num_unique{0};
+  bool _offset_built{false};
 
  public:
-  DeviceBitmap(int64_t num_elems, DGLContext ctx, bool allow_remap);
+  DeviceBitmap(int64_t num_elems, DGLContext ctx, int _comp_ratio = 8);
   ~DeviceBitmap();
+  /**
+   *
+   * @return number of 1 bits in the bitmap
+   */
+  int64_t numItem() const;
 
   void reset();
   /**
@@ -43,13 +49,7 @@ class DeviceBitmap {
   /**
       create bitmap global to local id maps
   */
-  int64_t buildMap();
-
-  /**
-   *
-   * @return number of 1 bits in the bitmap
-   */
-  int64_t numItem() const;
+  int64_t buildOffset();
 
   /**
       @params: IdType: type of the output row
@@ -67,7 +67,7 @@ class DeviceBitmap {
       @params: write the indices of bits flagged as 1 in out_row
   */
   template <typename IdType>
-  void map(const IdType* d_row, int64_t num_rows, IdType* d_out_row) const;
+  void map(const IdType* d_row, int64_t num_rows, IdType* d_out_row);
 };  // DeviceBitmap
 }  // namespace dgl::dev
 #endif  // DGL_BITMAP_H
