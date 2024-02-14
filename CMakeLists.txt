@@ -12,6 +12,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include(cmake/util/Util.cmake)
 include(cmake/util/MshadowUtil.cmake)
 include(cmake/util/FindCUDA.cmake)
+include(cmake/util/FindNCCL.cmake)
 
 # Options for building DGL.
 # NOTE: Please avoid editing this file to change build type. Instead, using
@@ -279,8 +280,6 @@ if(USE_CUDA)
   dgl_config_cuda(DGL_LINKER_LIBS)
   cuda_add_library(dgl SHARED ${DGL_SRC})
 else(USE_CUDA)
-  add_library(dgl SHARED ${DGL_SRC}
-          src/dev/coo2csr.cc)
 endif(USE_CUDA)
 
 # include directories
@@ -352,6 +351,8 @@ endif(EXTERNAL_PHMAP_PATH)
 
 target_include_directories(dgl PRIVATE "tensoradapter/include")
 target_include_directories(dgl PRIVATE "third_party/pcg/include")
+target_include_directories(dgl PRIVATE "third_party/nvtx/c/include")
+
 # add_subdirectory("third_party/oneTBB")
 # target_include_directories(dgl PRIVATE "third_party/oneTBB/include")
 # list(APPEND DGL_LINKER_LIBS TBB::tbb)
@@ -372,6 +373,9 @@ target_link_directories(dgl PRIVATE ${CMAKE_SOURCE_DIR}/experiment/preprocess/Py
 target_include_directories(dgl PRIVATE ${CMAKE_SOURCE_DIR}/experiment/preprocess/PyTorchMetis/tbb_build/include)
 target_link_directories(dgl PRIVATE ${CMAKE_SOURCE_DIR}/experiment/preprocess/PyTorchMetis/tbb_build/lib)
 list(APPEND DGL_LINKER_LIBS metis GKlib tbb tbbmalloc)
+
+target_include_directories(dgl PRIVATE ${NCCL_INCLUDE_DIR})
+list(APPEND DGL_LINKER_LIBS ${NCCL_LIBRARY})
 
 # if (EXTERNAL_METIS_PATH)
 #   find_package(METIS REQUIRED)

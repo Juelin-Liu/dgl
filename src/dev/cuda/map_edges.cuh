@@ -5,11 +5,10 @@
 #ifndef DGL_MAP_EDGES_CUH
 #define DGL_MAP_EDGES_CUH
 
-#include <assert.h>
-
 #include "../../graph/unit_graph.h"
 #include "../../runtime/cuda/cuda_common.h"
 #include "../../runtime/cuda/cuda_hashtable.cuh"
+
 using namespace dgl::runtime::cuda;
 namespace dgl::dev {
 template <typename IdType>

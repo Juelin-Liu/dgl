@@ -1,2 +1,2 @@
-from .dataloader import *
-from .util import *
+from .dataloader import GraphDataloader
+from .splitloader import SplitGraphLoader

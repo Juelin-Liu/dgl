@@ -1,4 +1,5 @@
 //
+//
 // Created by juelin on 2/6/24.
 //
 #include <dgl/runtime/tensordispatch.h>
@@ -353,19 +354,24 @@ DeviceBitmap::DeviceBitmap(int64_t num_elems, DGLContext ctx, int comp_ratio) {
       cudaMemsetAsync(_bitmap, 0, _num_buckets * sizeof(BucketType), stream));
   _offset = static_cast<OffsetType *>(
       device->AllocWorkspace(ctx, _num_offset * sizeof(OffsetType)));
+  CUDA_CALL(cudaEventCreate(&_event));
 }
 
 DeviceBitmap::~DeviceBitmap() {
   auto device = runtime::DeviceAPI::Get(_ctx);
+//  auto stream = runtime::getCurrentCUDAStream();
+  CUDA_CALL(cudaEventSynchronize(_event));
+  CUDA_CALL(cudaEventDestroy(_event));
   if (_bitmap) device->FreeWorkspace(_ctx, _bitmap);
   if (_offset) device->FreeWorkspace(_ctx, _offset);
+  if (_d_temp_storage) device->FreeWorkspace(_ctx, _d_temp_storage);
 }
 
 void DeviceBitmap::reset() {
   auto device = runtime::DeviceAPI::Get(_ctx);
   auto stream = runtime::getCurrentCUDAStream();
   cudaMemsetAsync(_bitmap, 0, _num_buckets * sizeof(BucketType), stream);
-  device->StreamSync(_ctx, stream);
+//  device->StreamSync(_ctx, stream);
 }
 
 template <typename IdType>
@@ -421,15 +427,23 @@ int64_t DeviceBitmap::buildOffset() {
       break;
   }
   // use prefix sum to compute the indices
-  void *d_temp_storage = nullptr;
   size_t temp_storage_bytes = 0;
   auto d_in = _offset;
   auto d_out = _offset;
   auto num_items = _num_offset;
+
   CUDA_CALL(cub::DeviceScan::ExclusiveSum(
-      d_temp_storage, temp_storage_bytes, d_in, d_out, num_items, stream));
-  //  cudaMalloc(&d_temp_storage, temp_storage_bytes);
-  d_temp_storage = device->AllocWorkspace(_ctx, temp_storage_bytes);
+      nullptr, temp_storage_bytes, d_in, d_out, num_items, stream));
+
+  if (_d_temp_storage == nullptr) {
+    _d_temp_storage = device->AllocWorkspace(_ctx, temp_storage_bytes);
+    _temp_storage_bytes = temp_storage_bytes;
+  } else if (temp_storage_bytes > _temp_storage_bytes) {
+    CUDA_CALL(cudaEventSynchronize(_event));
+    device->FreeWorkspace(_ctx, _d_temp_storage);
+    _d_temp_storage = device->AllocWorkspace(_ctx, temp_storage_bytes);
+    _temp_storage_bytes = temp_storage_bytes;
+  };
 
   NDArray new_len_tensor;
   if (TensorDispatcher::Global()->IsAvailable()) {
@@ -441,13 +455,14 @@ int64_t DeviceBitmap::buildOffset() {
         {1}, DGLDataTypeTraits<OffsetType>::dtype, DGLContext{kDGLCPU, 0});
   }
   CUDA_CALL(cub::DeviceScan::ExclusiveSum(
-      d_temp_storage, temp_storage_bytes, d_in, d_out, num_items, stream));
+      _d_temp_storage, temp_storage_bytes, d_in, d_out, num_items, stream));
   CUDA_CALL(cudaMemcpyAsync(
       new_len_tensor.Ptr<OffsetType>(), _offset + _num_offset - 1,
       sizeof(OffsetType), cudaMemcpyDefault, stream));
 
+  CUDA_CALL(cudaEventRecord(_event, stream));
+  CUDA_CALL(cudaEventSynchronize(_event));
   device->StreamSync(_ctx, stream);
-  device->FreeWorkspace(_ctx, d_temp_storage);
   _offset_built = true;
   _num_unique = new_len_tensor.Ptr<OffsetType>()[0];
   return _num_unique;
@@ -471,39 +486,6 @@ int64_t DeviceBitmap::numItem() const {
   device->StreamSync(_ctx, stream);
   return h_num_item;
 }
-
-// template <typename IdType>
-// int64_t DeviceBitmap::unique(IdType *out_row) const {
-//   auto device = runtime::DeviceAPI::Get(_ctx);
-//   auto stream = runtime::getCurrentCUDAStream();
-//
-//   int num_items = _num_buckets * sizeof(Bucket) * 8;
-//   auto d_in = cub::CountingInputIterator<IdType>(0);
-//   DeviceBitIterator d_flags(_bitmap, _num_buckets, 0);
-//   IdType *d_out = out_row;
-//   int64_t *d_num_selected_out =
-//       static_cast<int64_t *>(device->AllocWorkspace(_ctx, sizeof(int64_t)));
-//   void *d_temp_storage = NULL;
-//   size_t temp_storage_bytes = 0;
-//   CUDA_CALL(cub::DeviceSelect::Flagged(
-//       d_temp_storage, temp_storage_bytes, d_in, d_flags, d_out,
-//       d_num_selected_out, num_items, stream));
-//   device->StreamSync(_ctx, stream);
-//   d_temp_storage = device->AllocWorkspace(_ctx, temp_storage_bytes);
-//   // Run selection
-//   CUDA_CALL(cub::DeviceSelect::Flagged(
-//       d_temp_storage, temp_storage_bytes, d_in, d_flags, d_out,
-//       d_num_selected_out, num_items, stream));
-//   int64_t h_num_selected_out{0};
-//   cudaDeviceSynchronize();
-//   CUDA_CALL(cudaMemcpyAsync(
-//       &h_num_selected_out, d_num_selected_out, sizeof(int64_t),
-//       cudaMemcpyDefault, stream));
-//   device->StreamSync(_ctx, stream);
-//   device->FreeWorkspace(_ctx, d_temp_storage);
-//   device->FreeWorkspace(_ctx, d_num_selected_out);
-//   return h_num_selected_out;
-// };
 
 template <typename IdType>
 int64_t DeviceBitmap::unique(IdType *out_row) {
@@ -585,7 +567,8 @@ void DeviceBitmap::map(const IdType *row, int64_t num_rows, IdType *out_row) {
       LOG(ERROR) << "unsupported compression ratio, must be 1, 4, 8, 16, 32";
       break;
   }
-  device->StreamSync(_ctx, stream);
+//  device->StreamSync(_ctx, stream);
+  CUDA_CALL(cudaEventRecord(_event, stream));
 };
 
 template void DeviceBitmap::flag<int32_t>(const int32_t *, int64_t);

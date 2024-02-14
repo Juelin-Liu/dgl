@@ -20,11 +20,14 @@ class DeviceBitmap {
  private:
   BucketType* _bitmap{nullptr};  // 1 if mapped 0 otherwise
   OffsetType* _offset{nullptr};  // used for fast indexing during mapping
+  void* _d_temp_storage{nullptr};// temp storage for prefix sum
   DGLContext _ctx{};
+  cudaEvent_t _event{};
   uint32_t _num_buckets{0};
   uint32_t _num_offset{0};
   uint32_t _comp_ratio{4};  // number of 32-bit buckets counted per offset
   uint32_t _num_unique{0};
+  uint32_t _temp_storage_bytes{0};
   bool _offset_built{false};
 
  public:

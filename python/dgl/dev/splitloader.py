@@ -1,30 +1,38 @@
-from .dataloader_util import *
-from .util import SampleConfig, IdxLoader
-from torch.cuda import device_count, nvtx
+from dgl.backend import to_dgl_nd, from_dgl_nd
+from torch import Tensor
 
+from torch.cuda import nvtx, device_count
 from .. import DGLGraph
 
-class GraphDataloader:
-    def __init__(self, g: DGLGraph, target_idx: Tensor, config: SampleConfig):
+from .util import IdxLoader, SampleConfig
+from .splitloader_util import *
+from .._ffi.function import _init_api
+_init_api("dgl.dev", __name__)
+
+
+class SplitGraphLoader:
+    def __init__(self, g: DGLGraph, partition_map: Tensor, target_idx: Tensor, config: SampleConfig):
         assert (config.mode in ["uva", "gpu"])
         assert (config.fanouts is not None)
         assert (config.rank < device_count())
         assert ("csc" in g.formats()["created"])
+
         self.device = f"cuda:{config.rank}"
         self.rank = config.rank
         self.loc_idx_size = target_idx.shape[0] // config.world_size + 1
         self.fanouts = config.fanouts
         self.replace = config.replace
         self.reindex = config.reindex
+        self.partition_map = partition_map
         self.batch_size = config.batch_size // config.world_size
 
         self.global_target_idx = target_idx
         self.target_idx = target_idx[config.rank * self.loc_idx_size:(config.rank + 1) * self.loc_idx_size].clone().to(
             self.device)
         self.idx_loader = IdxLoader(target_idx=self.target_idx,
-                                     batch_size=self.batch_size,
-                                     drop_last=config.drop_last,
-                                     shuffle=True)
+                                    batch_size=self.batch_size,
+                                    drop_last=config.drop_last,
+                                    shuffle=True)
 
         self.iter = iter(self.idx_loader)
         self.config = config
@@ -37,6 +45,8 @@ class GraphDataloader:
         indptr, indices, _ = self.g.adj_tensors("csc")
         SetGraph(indptr, indices)
         SetFanout(config.fanouts)
+        SetPartitionMap(config.num_partition, partition_map)
+        SetRank(config.rank, config.world_size)
 
     def set_fanout(self, fanouts):
         self.fanouts = fanouts

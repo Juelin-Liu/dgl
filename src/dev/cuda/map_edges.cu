@@ -1,13 +1,9 @@
 //
 // Created by juelinliu on 12/11/23.
 //
-
-#include <assert.h>
-
-#include "../../graph/unit_graph.h"
-#include "../../runtime/cuda/cuda_common.h"
-#include "../../runtime/cuda/cuda_hashtable.cuh"
 #include "map_edges.cuh"
+#include <cassert>
+
 using namespace dgl::runtime::cuda;
 namespace dgl::runtime::cuda {
 template class OrderedHashTable<int32_t>;

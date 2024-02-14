@@ -64,7 +64,7 @@ class CudaTimer:
         return duration_s
     
 class Config:
-    def __init__(self, graph_name, world_size, num_epoch, fanouts,
+    def __init__(self, graph_name, world_size, num_partition, num_epoch, fanouts,
                  batch_size, system, model, hid_size, cache_size, log_path, data_dir):
         try:
             self.machine_name = os.environ['MACHINE_NAME']
@@ -72,6 +72,7 @@ class Config:
             self.machine_name = "jupiter"
         self.graph_name = graph_name
         self.world_size = world_size
+        self.num_partition = num_partition
         self.num_epoch = num_epoch
         self.fanouts = fanouts
         self.batch_size = batch_size
@@ -97,14 +98,14 @@ class Config:
                     f"{len(self.fanouts)}x{self.fanouts[0]}_{self.num_redundant_layer}_{self.cache_size}")
 
     def header(self):
-        return ["timestamp","machine_name", "graph_name", "feat_width", "world_size", "num_epoch", "fanouts", "num_redundant_layers", \
+        return ["timestamp","machine_name", "graph_name", "feat_width", "world_size", "num_partition", "num_epoch", "fanouts", "num_redundant_layers", \
                 "batch_size", "system", \
                     "model", "hid_size", "cache_size", "partition_type"]
     
     def content(self):
         connection = "_nvlink" if self.nvlink else "_pcie"
         machine_name = self.machine_name + connection
-        return [pd.Timestamp('now'), machine_name, self.graph_name, self.in_feat, self.world_size, self.num_epoch, self.fanouts, self.num_redundant_layer, \
+        return [pd.Timestamp('now'), machine_name, self.graph_name, self.in_feat, self.world_size, self.num_partition, self.num_epoch, self.fanouts, self.num_redundant_layer, \
                     self.batch_size, self.system, self.model, self.hid_size, self.cache_size, self.partition_type]
 
     def __repr__(self):
