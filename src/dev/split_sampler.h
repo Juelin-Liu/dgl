@@ -53,12 +53,14 @@ class SplitSampler {
   NDArray _partition_map;
   std::vector<int64_t> _fanouts;
   std::shared_ptr<SplitBatch> _batch;
+  int64_t _v_num{0};
+  int64_t _e_num{0};
   int64_t _next_id{0};
   int64_t _rank{0};
   int64_t _world_size{0};
   int64_t _num_partitions{0};
   int64_t _num_dp{0};  // number of dp layers
-
+  ncclComm_t _nccl_comm{nullptr};
   bool _use_bitmap{false};
   DGLContext _ctx{};  // inferred from the ctx of the seeds
 
@@ -107,9 +109,18 @@ class SplitSampler {
   }
 
  public:
+  ~SplitSampler() {
+    if (_nccl_comm) ncclCommDestroy(_nccl_comm);
+  }
+
   static std::shared_ptr<SplitSampler> Global() {
     static auto single_instance = std::make_shared<SplitSampler>();
     return single_instance;
+  }
+
+  void initNcclComm(int64_t nranks, ncclUniqueId commId, int64_t rank){
+    auto res = ncclCommInitRank(&_nccl_comm, nranks, commId, rank);
+    CHECK_EQ(res, ncclSuccess);
   }
 
   void setGraph(
@@ -130,6 +141,8 @@ class SplitSampler {
     else
       _csc = aten::CSRMatrix(nrows, ncols, indptr, indices, data);
     _next_id = 0;
+    _v_num = nrows;
+    _e_num = ncols;
   }
 
   void setPartitionMap(const NDArray& partition_map) {
@@ -179,10 +192,11 @@ class SplitSampler {
         auto unique_src = getUnique({frontier, block.col});
         auto partition_idx = IndexSelect(
             _partition_map, unique_src, runtime::getCurrentCUDAStream());
-        auto scatter_arr = ScatteredArray::Create(
-            unique_src.NumElements(), _num_partitions, _ctx, unique_src->dtype);
+        auto scatter_arr =
+            ScatteredArray::Create(_v_num, _ctx, unique_src->dtype, _nccl_comm);
         // send remote frontiers to remote gpus
         // and receive frontiers from other gpus
+        // build corresponding indices for mapping
         Scatter(
             _rank, _world_size, _num_partitions, unique_src, partition_idx,
             scatter_arr);
@@ -213,8 +227,8 @@ class SplitSampler {
           int64_t v_num = _csc.indptr.NumElements() - 1;
           DeviceBitmap bitmap(v_num, _ctx);
           bitmap.flag(all_nodes.Ptr<IdType>(), all_nodes.NumElements());
-          int64_t num_mapped = bitmap.buildOffset();
-          CHECK_EQ(num_mapped, num_input);
+          bitmap.buildOffset();
+          assert(bitmap.numItem() == num_input);
           for (auto& block : batch->_blocks) {
             bitmap.map(
                 block.col.Ptr<IdType>(), block.col.NumElements(),

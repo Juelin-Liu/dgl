@@ -164,8 +164,8 @@ class Sampler {
           int64_t v_num = _csc.indptr.NumElements() - 1;
           DeviceBitmap bitmap(v_num, _ctx);
           bitmap.flag(all_nodes.Ptr<IdType>(), all_nodes.NumElements());
-          int64_t num_mapped = bitmap.buildOffset();
-          CHECK_EQ(num_mapped, num_input);
+          bitmap.buildOffset();
+          assert(bitmap.numItem() == num_input);
           for (auto &block: batch->_blocks) {
             bitmap.map(block.col.Ptr<IdType>(), block.col.NumElements(), block.col.Ptr<IdType>());
             bitmap.map(block.row.Ptr<IdType>(), block.row.NumElements(), block.row.Ptr<IdType>());

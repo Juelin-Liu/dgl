@@ -10,7 +10,7 @@ from contextlib import contextmanager
 
 import networkx as nx
 import numpy as np
-
+from torch.cuda import nvtx 
 from . import backend as F, core, graph_index, heterograph_index, utils
 
 from ._ffi.function import _init_api
@@ -93,9 +93,13 @@ class DGLGraph(object):
                 "Recommend creating graphs by `dgl.graph(data)`"
                 " instead of `dgl.DGLGraph(data)`."
             )
+            nvtx.range_push("graph data 2 tensors")
             (sparse_fmt, arrays), num_src, num_dst = utils.graphdata2tensors(
                 gidx
             )
+            nvtx.range_pop()
+            
+            nvtx.range_push("create unit graph")
             if sparse_fmt == "coo":
                 gidx = heterograph_index.create_unitgraph_from_coo(
                     1,
@@ -116,12 +120,17 @@ class DGLGraph(object):
                     ["coo", "csr", "csc"],
                     sparse_fmt == "csc",
                 )
+            nvtx.range_pop()
+            
+        nvtx.range_push("_init graph")
         if len(deprecate_kwargs) != 0:
             dgl_warning(
                 "Keyword arguments {} are deprecated in v0.5, and can be safely"
                 " removed in all cases.".format(list(deprecate_kwargs.keys()))
             )
         self._init(gidx, ntypes, etypes, node_frames, edge_frames)
+        nvtx.range_pop()
+
 
     def _init(self, gidx, ntypes, etypes, node_frames, edge_frames):
         """Init internal states."""

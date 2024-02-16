@@ -7,27 +7,27 @@
 #include <utility>
 
 #include "../runtime/cuda/cuda_common.h"
-#include "../runtime/cuda/cuda_hashtable.cuh"
+//#include "../runtime/cuda/cuda_hashtable.cuh"
 #include "cuda/all2all.h"
+#include "cuda/gather.h"
 #include "cuda/index_select.cuh"
 #include "cuda/map_edges.cuh"
-#include "cuda/gather.h"
 #include "cuda/partition.h"
+#include "cuda/bitmap.h"
 
 namespace dgl::dev {
 using namespace runtime;
 
 // Index type should be 64 bits for all 2 all
-typedef int64_t IndexType;
+//typedef int64_t IndexType;
 
 template <typename IndexType>
 std::tuple<IdArray, IdArray, IdArray> compute_partition_continuous_indices(
     IdArray partition_map, int num_partitions, cudaStream_t stream) {
   std::tuple<IdArray, IdArray, IdArray> ret;
   ATEN_ID_TYPE_SWITCH(partition_map->dtype, IdType, {
-    ret =
-        compute_partition_continuous_indices<kDGLCUDA, IndexType, IdType>(
-            partition_map, num_partitions, stream);
+    ret = compute_partition_continuous_indices<kDGLCUDA, IndexType, IdType>(
+        partition_map, num_partitions, stream);
   });
   return ret;
 }
@@ -59,7 +59,7 @@ IdArray gather_atomic_accumulation(
 }
 
 NDArray ScatteredArrayObject::shuffle_forward(
-    const NDArray& feat, int rank, int world_size) const {
+    const NDArray &feat, int rank, int world_size) const {
   CHECK_EQ(feat->shape[0], unique_array->shape[0]);
   CHECK_EQ(feat->ndim, 2);
   CHECK_EQ(feat->shape[0], _unique_dim);
@@ -75,12 +75,11 @@ NDArray ScatteredArrayObject::shuffle_forward(
   NDArray feat_offsets;
   cudaDeviceSynchronize();
   CHECK_EQ(
-      shuffled_recv_offsets.ToVector<int64_t>()[world_size],
+      global_src_offset.ToVector<int64_t>()[world_size],
       toShuffle->shape[0]);
 
   std::tie(feat_shuffled, feat_offsets) = dev::Alltoall(
-      rank, world_size, toShuffle, feat->shape[1], shuffled_recv_offsets,
-      partitionContinuousOffsets, stream);
+      rank, world_size, toShuffle, global_src_offset, local_unique_src_offset, stream, _nccl_comm);
 
   const int num_nodes = feat_shuffled->shape[0] / feat->shape[1];
 
@@ -90,7 +89,7 @@ NDArray ScatteredArrayObject::shuffle_forward(
       {feat_shuffled_reshape->shape[0], feat->shape[1]}, feat_shuffled->dtype,
       feat->ctx);
   IndexSelect(
-      feat_shuffled_reshape, scatter_idx_in_part_disc_cont, partDiscFeat,
+      feat_shuffled_reshape, scatter_idx, partDiscFeat,
       stream);
 
   CHECK_EQ(partDiscFeat->shape[0], _scatter_dim);
@@ -98,23 +97,23 @@ NDArray ScatteredArrayObject::shuffle_forward(
 }
 
 NDArray ScatteredArrayObject::shuffle_backward(
-    const NDArray& back_grad, int rank, int world_size) const {
+    const NDArray &back_grad, int rank, int world_size) const {
   CHECK_EQ(back_grad->shape[0], _scatter_dim);
   cudaStream_t stream = runtime::getCurrentCUDAStream();
   // backgrad is part disccont
   NDArray part_cont = NDArray::Empty(
-      {partitionContinuousArray->shape[0], back_grad->shape[1]},
+      {send_offset->shape[0], back_grad->shape[1]},
       back_grad->dtype, back_grad->ctx);
   //      atomic_accumulation(part_cont, idx_original_to_part_cont, back_grad);
   //      assert(idx_original_to_part_cont->shape[0]!=back_grad->shape[0]);
-  IndexSelect(back_grad, gather_idx_in_part_disc_cont, part_cont, stream);
+  IndexSelect(back_grad, gather_idx, part_cont, stream);
 
   NDArray grad_shuffled;
   NDArray grad_offsets;
 
   std::tie(grad_shuffled, grad_offsets) = dev::Alltoall(
-      rank, world_size, part_cont, back_grad->shape[1],
-      partitionContinuousOffsets, shuffled_recv_offsets, stream);
+      rank, world_size, part_cont, local_unique_src_offset,
+      global_src_offset, stream, _nccl_comm);
 
   const int num_nodes = grad_shuffled->shape[0] / back_grad->shape[1];
 
@@ -144,91 +143,46 @@ NDArray ScatteredArrayObject::shuffle_backward(
 
 void Scatter(
     int64_t rank, int64_t world_size, int64_t num_partitions,
-    const NDArray &frontier, const NDArray &_partition_map,
+    const NDArray &local_unique_src, const NDArray &local_partition_idx,
     ScatteredArray array) {
-  CHECK_EQ(array->dtype, frontier->dtype);
-  CHECK_GT(frontier->shape[0], 0);
-  CHECK_LE(frontier->shape[0], array->_expect_size);
+  CHECK_EQ(array->dtype, local_unique_src->dtype);
+  CHECK_GT(local_unique_src->shape[0], 0);
+  CHECK_EQ(local_partition_idx.NumElements(), local_unique_src.NumElements());
   CHECK_EQ(num_partitions, world_size);
+  CHECK_GT(world_size, 1) << "World size must be greater than 1";
+  auto ctx = array->ctx;
+  auto dtype = array->dtype;
+  auto device = runtime::DeviceAPI::Get(ctx);
 
-  array->_scatter_dim = frontier->shape[0];
-  array->originalArray = frontier;
-  array->partitionMap = _partition_map;
-
-  // Compute partition continuous array
   cudaStream_t stream = runtime::getCurrentCUDAStream();
-  // Todo: Why not runtime stream
-  nvtxRangePushA("upper_index");
-  std::tuple<IdArray, IdArray, IdArray> out;
+  array->_scatter_dim = local_unique_src->shape[0];
+  array->local_unique_src = local_unique_src;
+  array->local_part_idx = local_partition_idx;
+  std::tie(
+      array->local_unique_src_offset, array->gather_idx, array->scatter_idx) =
+      compute_partition_continuous_indices<int64_t>(
+          array->local_part_idx, num_partitions, stream);
+  array->send_offset =
+      IndexSelect(array->local_unique_src, array->gather_idx, stream);
 
-  out = compute_partition_continuous_indices<IndexType>(
-      array->partitionMap, num_partitions, stream);
-
-  const auto
-      &[boundary_offsets, gather_idx_in_part_disc_cont,
-        scatter_idx_in_part_disc_cont] = out;
-
-  nvtxRangePop();
-  nvtxRangePushA("create_message");
-  array->partitionContinuousArray =
-      IndexSelect(frontier, gather_idx_in_part_disc_cont, stream);
-  array->gather_idx_in_part_disc_cont = gather_idx_in_part_disc_cont;
-  array->scatter_idx_in_part_disc_cont = scatter_idx_in_part_disc_cont;
-  array->partitionContinuousOffsets = boundary_offsets;
-  nvtxRangePop();
-
-  if (array->debug) {
-    cudaStreamSynchronize(stream);
-    CHECK_EQ(
-        boundary_offsets.ToVector<int64_t>()[4],
-        array->partitionContinuousArray->shape[0]);
-  }
-  nvtxRangePushA("shuffle");
-  if (world_size != 1) {
-    std::tie(array->shuffled_array, array->shuffled_recv_offsets) =
-        dev::Alltoall(
-            rank, world_size, array->partitionContinuousArray, 1,
-            boundary_offsets, aten::NullArray(), stream);
-  } else {
-    array->shuffled_array = array->partitionContinuousArray;
-    array->shuffled_recv_offsets = boundary_offsets;
-  }
-  nvtxRangePop();
-  nvtxRangePushA("lower_index");
-  auto device = runtime::DeviceAPI::Get(frontier->ctx);
-  auto ctx = frontier->ctx;
-  auto dtype = frontier->dtype;
-
-  ATEN_ID_TYPE_SWITCH(frontier->dtype, IdType, {
-    auto *d_num_item =
-        static_cast<int64_t *>(device->AllocWorkspace(ctx, sizeof(int64_t)));
-
-    auto &shuffled_arr = array->shuffled_array;
-    auto &unique_arr = array->unique_array;
-    auto num_input = shuffled_arr.NumElements();
-    auto table =
-        runtime::cuda::OrderedHashTable<IdType>(num_input, ctx, stream);
-    if (array->unique_array.NumElements() < num_input) {
-      array->unique_array = NDArray::Empty({num_input}, frontier->dtype, ctx);
-    }
-
-    int64_t h_num_item = 0;
-
-    table.FillWithDuplicates(
-        shuffled_arr.Ptr<IdType>(), num_input, unique_arr.Ptr<IdType>(),
-        d_num_item, stream);
-    CUDA_CALL(cudaMemcpyAsync(
-        &h_num_item, d_num_item, sizeof(int64_t), cudaMemcpyDeviceToHost,
-        stream));
+  std::tie(array->global_src, array->global_src_offset) = dev::Alltoall(
+      rank, world_size, array->send_offset, array->local_unique_src_offset,
+      aten::NullArray(), stream, array->_nccl_comm);
+//  LOG(INFO) << "rank " << rank << " start mapping";
+  ATEN_ID_TYPE_SWITCH(array->global_src->dtype, IdType, {
+    auto bitmap = DeviceBitmap(array->_v_num, ctx);
+    bitmap.flag(
+        array->global_src.Ptr<IdType>(), array->global_src.NumElements());
+    NDArray unique_arr =
+        NDArray::Empty({array->global_src.NumElements()}, dtype, ctx);
     array->gather_idx_in_unique_out_shuffled =
-        IdArray::Empty({num_input}, dtype, ctx);
-    GPUMapEdges(
-        array->shuffled_array, array->gather_idx_in_unique_out_shuffled, table,
-        stream);
-    device->StreamSync(ctx, stream);
-    array->_unique_dim = h_num_item;
-    device->FreeWorkspace(ctx, d_num_item);
+        NDArray::Empty({array->global_src.NumElements()}, dtype, ctx);
+
+    array->_unique_dim = bitmap.unique(unique_arr.Ptr<IdType>());
+    bitmap.map(array->global_src.Ptr<IdType>(),array->global_src.NumElements(),
+               array->gather_idx_in_unique_out_shuffled.Ptr<IdType>());
+    array->unique_array = unique_arr.CreateView({array->_unique_dim}, dtype);
   });
-  nvtxRangePop();
+//  LOG(INFO) << "rank " << rank << " done mapping";
 }
 }  // namespace dgl::dev

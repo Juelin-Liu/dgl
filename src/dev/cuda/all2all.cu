@@ -2,21 +2,50 @@
 // Created by juelin on 2/14/24.
 //
 
-#include "./all2all.h"
 #include "../../runtime/cuda/cuda_common.h"
+#include "./all2all.h"
+
+/**
+ * Dispatch according to data type (int32, int64, float32 or float64):
+ *
+ * ATEN_DTYPE_SWITCH(array->dtype, DType, {
+ *   // Now DType is the type corresponding to data type in array.
+ *   // For instance, one can do this for a CPU array:
+ *   DType *data = static_cast<DType *>(array->data);
+ *   NCCL_DATA_TYPE is assigned to the associated nccl data type
+ * });
+ */
+#define ATEN_NCCL_TYPE_SWITCH(val, DType, ...)                       \
+  do {                                                               \
+    if ((val).code == kDGLInt && (val).bits == 32) {                 \
+      typedef int32_t DType;                                         \
+      auto NCCL_DATA_TYPE = ncclInt32;                               \
+      { __VA_ARGS__ }                                                \
+    } else if ((val).code == kDGLInt && (val).bits == 64) {          \
+      typedef int64_t DType;                                         \
+      auto NCCL_DATA_TYPE = ncclInt64;                               \
+      { __VA_ARGS__ }                                                \
+    } else if ((val).code == kDGLFloat && (val).bits == 32) {        \
+      typedef float DType;                                           \
+      auto NCCL_DATA_TYPE = ncclFloat32;                             \
+      { __VA_ARGS__ }                                                \
+    } else if ((val).code == kDGLFloat && (val).bits == 64) {        \
+      typedef double DType;                                          \
+      auto NCCL_DATA_TYPE = ncclFloat64;                             \
+      { __VA_ARGS__ }                                                \
+    } else {                                                         \
+      LOG(FATAL) << " can only be int32, int64, float32 or float64"; \
+    }                                                                \
+  } while (0)
 
 namespace dgl::dev {
-
-template<typename IdType>
+template <typename IdType>
 __global__ void DiffKernel(IdType* out, const IdType* in, int64_t size) {
   int tid = threadIdx.x;
   if (tid < size) {
     out[tid] = in[tid + 1] - in[tid];
   }
 }
-
-template __global__ void DiffKernel<int32_t >(int32_t *, const int32_t *, int64_t);
-template __global__ void DiffKernel<int64_t >(int64_t *, const int64_t *, int64_t);
 
 IdArray Diff(const IdArray& prefix_sum) {
   auto stream = runtime::getCurrentCUDAStream();
@@ -30,114 +59,74 @@ IdArray Diff(const IdArray& prefix_sum) {
   return ret;
 }
 
-template <typename T, ncclDataType_t NCCL_DATA_TYPE>
-void NCCLAllToAll(
-    IdArray send_buffer, const IdArray& send_offset,
-    IdArray recv_buffer, const IdArray& recv_offset,
-    int expand_size, int rank, int world_size,
-    ncclComm_t nccl_comm, cudaStream_t stream) {
-  //  auto stream = CUDAThreadEntry::ThreadLocal()->stream;
-  //  auto data_copy_stream = CUDAThreadEntry::ThreadLocal()->data_copy_stream;
-  T* send_buffer_ptr = send_buffer.Ptr<T>();
-  T* recv_buffer_ptr = recv_buffer.Ptr<T>();
-  int type_bytes = sizeof(T);
-  ATEN_ID_TYPE_SWITCH(send_offset->dtype, IdType, {
-    auto* send_offset_ptr = send_offset.Ptr<IdType>();
-    auto* recv_offset_ptr = recv_offset.Ptr<IdType>();
+NDArray NCCLAllToAll(
+    int64_t rank, int64_t world_size, const NDArray& input,
+    const IdArray& send_indptr, const IdArray& recv_indptr, cudaStream_t stream,
+    ncclComm_t nccl_comm) {
+  using IdType = int64_t;
+  CHECK_EQ(send_indptr->ctx, recv_indptr->ctx);
+  const auto expand_size = input.NumElements() / input->shape[0];
+  const auto send_offset_ptr = send_indptr.Ptr<IdType>();
+  const auto recv_offset_ptr = recv_indptr.Ptr<IdType>();
+  CUDA_CALL(cudaStreamSynchronize(stream));
+
+  const auto recv_num = recv_indptr.Ptr<IdType>()[world_size] * expand_size;
+  NDArray ret = NDArray::Empty({recv_num}, input->dtype, input->ctx);
+//  LOG(INFO) << "rank: " << rank << " ret buffer size " << recv_num << " ctx: " << ret->ctx;
+
+  ATEN_NCCL_TYPE_SWITCH(input->dtype, DType, {
+    const auto* send_buffer_ptr = input.Ptr<DType>();
+    auto* recv_buffer_ptr = ret.Ptr<DType>();
     ncclGroupStart();
-    for (int r = 0; r < world_size; ++r) {
-      if (r != rank) {
-        IdType send_size =
-            (send_offset_ptr[r + 1] - send_offset_ptr[r]) * expand_size;
-        IdType send_ptr = send_offset_ptr[r] * expand_size;
-        IdType recv_size =
-            (recv_offset_ptr[r + 1] - recv_offset_ptr[r]) * expand_size;
-        IdType recv_ptr = recv_offset_ptr[r] * expand_size;
-        ncclSend(
-            send_buffer_ptr + send_ptr, send_size, NCCL_DATA_TYPE, r, nccl_comm,
-            stream);
-        ncclRecv(
-            recv_buffer_ptr + recv_ptr, recv_size, NCCL_DATA_TYPE, r, nccl_comm,
-            stream);
-      }
+    for (int r = 0; r < world_size; r++) {
+      IdType send_size =
+          (send_offset_ptr[r + 1] - send_offset_ptr[r]) * expand_size;
+      IdType send_ptr = send_offset_ptr[r] * expand_size;
+      IdType recv_size =
+          (recv_offset_ptr[r + 1] - recv_offset_ptr[r]) * expand_size;
+      IdType recv_ptr = recv_offset_ptr[r] * expand_size;
+//      LOG(INFO) << "rank " << rank << "recv_ptr " << recv_ptr << " send_ptr " << send_ptr;
+      ncclSend(
+          send_buffer_ptr + send_ptr, send_size, NCCL_DATA_TYPE, r, nccl_comm,
+          stream);
+      ncclRecv(
+          recv_buffer_ptr + recv_ptr, recv_size, NCCL_DATA_TYPE, r, nccl_comm,
+          stream);
     }
     ncclGroupEnd();
-
-    CUDA_CALL(cudaMemcpyAsync(
-        recv_buffer_ptr + recv_offset_ptr[rank] * expand_size,
-        send_buffer_ptr + send_offset_ptr[rank] * expand_size,
-        (send_offset_ptr[rank + 1] - send_offset_ptr[rank]) * expand_size *
-            type_bytes,
-        cudaMemcpyDeviceToDevice, stream));
-//    CUDA_CALL(cudaStreamSynchronize(stream));
   });
+
+  CUDA_CALL(cudaStreamSynchronize(stream));
+  return ret;
 }
 
 std::pair<IdArray, IdArray> Alltoall(
-    int64_t rank, int64_t world_size, const IdArray& input, int64_t expand_size,
-    const IdArray& send_offset, IdArray recv_offset, cudaStream_t stream){
+    int64_t rank, int64_t world_size, const IdArray& input,
+    const IdArray& send_offset, IdArray recv_offset, cudaStream_t stream,
+    ncclComm_t nccl_comm) {
   // NCCL
-  auto nccl_comm = getNccl();
   CHECK_NE(nccl_comm, nullptr) << "Must call initNccl after spawn the process";
-
-  ATEN_ID_TYPE_SWITCH(input->dtype, IdType, {
-//  CHECK(send_offset->dtype.bits == 64);
-  auto send_sizes = Diff(send_offset);
-  auto ctx = input->ctx;
-  auto dtype = input->dtype;
-  auto host_ctx = DGLContext{kDGLCPU, 0};
-//  auto nccl_comm = getNcclCommunicator(rank);
-  // NOTE: to guarantee the send_offset is ready
-//  CUDA_CALL(cudaStreamSynchronize(stream));
-  // it is captured in the stream when you use copy to
   CHECK(send_offset->data != nullptr);
-  auto host_send_offset = static_cast<NDArray>(send_offset).PinMemory();
-  CUDA_CALL(cudaStreamSynchronize(stream));
+  auto send_sizes = Diff(send_offset);
+  auto host_ctx = DGLContext{kDGLCPU, 0};
+  auto host_send_offset = send_offset.CopyTo(host_ctx);
+//  LOG(INFO) << "send sizes: " << send_sizes;
+
   if (aten::IsNullArray(recv_offset)) {
-    IdArray recv_sizes =
-        IdArray::Empty({world_size}, send_offset->dtype, ctx);
-    IdArray range_seq = aten::Range(0, world_size + 1, 64, host_ctx);
-    if (send_offset->dtype.bits == 32) {
-      NCCLAllToAll<int32_t, ncclInt32>(
-          send_sizes, range_seq, recv_sizes, range_seq, 1, rank, world_size,
-          nccl_comm, stream);
-    } else {
-      NCCLAllToAll<int64_t, ncclInt64>(
-          send_sizes, range_seq, recv_sizes, range_seq, 1, rank, world_size,
-          nccl_comm, stream);
-    }
-    CUDA_CALL(cudaStreamSynchronize(stream));
+    auto comm_offset =
+        aten::Range(0, world_size + 1, send_offset->dtype.bits, host_ctx);
+    auto recv_sizes = NCCLAllToAll(
+        rank, world_size, send_sizes, comm_offset, comm_offset, stream,
+        nccl_comm);
     recv_offset = aten::CumSum(recv_sizes, true);
   }
 
-  auto host_recv_offset = recv_offset.PinMemory();
-  CUDA_CALL(cudaStreamSynchronize(stream));
-    auto* host_recv_offset_ptr = host_recv_offset.Ptr<IdType>();
-    int n_recv = host_recv_offset_ptr[world_size] * expand_size;
-    auto recvbuff = IdArray::Empty({n_recv}, input->dtype, ctx);
-    //   scheduler->TryComm(thread_id);
-    if (input->dtype.code == 0) {
-      if (input->dtype.bits == 32) {
-        NCCLAllToAll<int, ncclInt32>(
-            input, host_send_offset, recvbuff, host_recv_offset, expand_size,
-            rank, world_size, nccl_comm, stream);
-      } else {
-        NCCLAllToAll<int64_t, ncclInt64>(
-            input, host_send_offset, recvbuff, host_recv_offset, expand_size,
-            rank, world_size, nccl_comm, stream);
-      }
-    } else {
-      if (input->dtype.bits == 32) {
-        NCCLAllToAll<float, ncclFloat32>(
-            input, host_send_offset, recvbuff, host_recv_offset, expand_size,
-            rank, world_size, nccl_comm, stream);
-      } else {
-        NCCLAllToAll<double, ncclFloat64>(
-            input, host_send_offset, recvbuff, host_recv_offset, expand_size,
-            rank, world_size, nccl_comm, stream);
-      }
-    };
-    CUDA_CALL(cudaStreamSynchronize(stream));
-    return {recvbuff, recv_offset};});
+  auto host_recv_offset = recv_offset.CopyTo(host_ctx);
+//  LOG(INFO) << "recv offset: " << recv_offset;
+
+  auto retbuff = NCCLAllToAll(
+      rank, world_size, input, host_send_offset, host_recv_offset, stream,
+      nccl_comm);
+  return {retbuff, recv_offset};
 }
-}  // namespace dgl::ds
+}  // namespace dgl::dev

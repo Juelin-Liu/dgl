@@ -11,15 +11,6 @@
 
 namespace dgl::dev {
 
-
-static std::shared_ptr<ncclComm_t> getNcclPtr() {
-  static auto comm = std::make_shared<ncclComm_t>();
-  return comm;
-}
-
-static ncclComm_t getNccl() {
-    return *getNcclPtr().get();
-}
 /**
  * @brief Unified alltoall communication.
  *
@@ -32,8 +23,9 @@ static ncclComm_t getNccl() {
  */
 // FIXME: wrap the low-level communicator
 std::pair<IdArray, IdArray> Alltoall(
-    int64_t rank, int64_t world_size, const IdArray& input, int64_t expand_size,
-    const IdArray& send_offset, IdArray recv_offset, cudaStream_t stream);
+    int64_t rank, int64_t world_size, const IdArray& input,
+    const IdArray& send_offset, IdArray recv_offset, cudaStream_t stream,
+    ncclComm_t nccl_comm);
 
 }
 

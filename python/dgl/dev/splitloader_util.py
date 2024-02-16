@@ -9,8 +9,11 @@ from torch.cuda import nvtx
 def SetRank(rank: int, world_size: int):
     _CAPI_Split_SetRank(rank, world_size)
 
-def InitNccl(rank: int,  nrank : int, unique_id: str):
-    _CAPI_InitNccl(nrank, rank, unique_id)
+def GetUniqueId():
+    return from_dgl_nd(_CAPI_GetUniqueId())
+
+def InitNccl(rank: int,  nrank : int, unique_id: Tensor):
+    _CAPI_Split_InitNccl(rank, nrank, to_dgl_nd(unique_id))
 
 def SetPartitionMap(num_partition: int, partition_map: Tensor):
     _CAPI_Split_SetPartitionMap(num_partition, to_dgl_nd(partition_map))

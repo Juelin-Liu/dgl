@@ -27,39 +27,28 @@ DGL_REGISTER_GLOBAL("dev._CAPI_Split_ScatterBackward")
       *rv = scatter_array->shuffle_backward(grads, rank, world_size);
     });
 
-DGL_REGISTER_GLOBAL("dev._CAPI_Split_GetScatteredArrayObject")
-    .set_body([](DGLArgs args, DGLRetValue *rv) {
-      NDArray frontier = args[0];
-      NDArray partition_map = args[1];
-      int num_partitions = args[2];
-      int rank = args[3];
-      int world_size = args[4];
-      ScatteredArray scatter_array = ScatteredArray::Create(frontier->shape[0] * 2, 4, frontier->ctx, frontier->dtype);
-      Scatter(
-          rank, world_size, num_partitions, frontier, partition_map,
-          scatter_array);
-      *rv = scatter_array;
-    });
-
-
-
-DGL_REGISTER_GLOBAL("dev._CAPI_InitNccl")
+DGL_REGISTER_GLOBAL("dev._CAPI_Split_InitNccl")
     .set_body([](DGLArgs args, DGLRetValue *rv) {
       int64_t rank = args[0];
       int64_t nranks = args[1];
-      std::string unique_id = args[2];
-      ncclUniqueId nccl_id;
-      memcpy(nccl_id.internal, unique_id.c_str(), sizeof(char) * unique_id.size());
-      auto res = ncclCommInitRank(getNcclPtr().get(), nranks, nccl_id, rank);
-      CHECK_EQ(res, ncclSuccess);
-      LOG(INFO) << "Initializing NCCL at rank " << rank << " comm: " << getNccl();
+      NDArray unique_id = args[2];
+      ncclUniqueId commId;
+      memcpy(commId.internal, unique_id.Ptr<uint8_t >(), 128);
+
+      auto sampler = SplitSampler::Global();
+      sampler->initNcclComm(nranks, commId, rank);
+      LOG(INFO) << "Initialed NCCL at rank " << rank << " nranks:" << nranks;
     });
 
 DGL_REGISTER_GLOBAL("dev._CAPI_GetUniqueId")
     .set_body([](DGLArgs args, DGLRetValue *rv) {
       ncclUniqueId  uniqueId;
       ncclGetUniqueId(&uniqueId);
-      *rv = std::string(uniqueId.internal);
+
+      auto ret = NDArray::CreateFromRaw(
+          {128}, DGLDataTypeTraits<uint8_t >::dtype, DGLContext{DGLDeviceType::kDGLCPU,0},
+          uniqueId.internal, false);
+      *rv = ret.Clone();
     });
 
 DGL_REGISTER_GLOBAL("dev._CAPI_Split_SetGraph")

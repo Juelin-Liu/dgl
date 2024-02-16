@@ -14,8 +14,10 @@
 #include <iterator>
 
 namespace dgl::dev {
+
 typedef int32_t BucketType;
 typedef uint32_t OffsetType;
+
 class DeviceBitmap {
  private:
   BucketType* _bitmap{nullptr};  // 1 if mapped 0 otherwise
@@ -25,7 +27,7 @@ class DeviceBitmap {
   cudaEvent_t _event{};
   uint32_t _num_buckets{0};
   uint32_t _num_offset{0};
-  uint32_t _comp_ratio{4};  // number of 32-bit buckets counted per offset
+  uint32_t _comp_ratio{8};  // number of 32-bit buckets counted per offset
   uint32_t _num_unique{0};
   uint32_t _temp_storage_bytes{0};
   bool _offset_built{false};
@@ -38,7 +40,7 @@ class DeviceBitmap {
    * @return number of 1 bits in the bitmap
    */
   int64_t numItem() const;
-
+  void sync();
   void reset();
   /**
       @params: IdType: type of the input row
@@ -52,7 +54,7 @@ class DeviceBitmap {
   /**
       create bitmap global to local id maps
   */
-  int64_t buildOffset();
+  void buildOffset();
 
   /**
       @params: IdType: type of the output row

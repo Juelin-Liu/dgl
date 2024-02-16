@@ -13,6 +13,33 @@
 #define BucketHighestBit 0x80000000  // 1000,0000,0000,0000,...,0000 in binary
 #define BlockSize 256
 #define WarpSize 32
+constexpr int name = 1;
+
+#define ATEN_COMP_RATIO_SWITCH(comp_ratio, COMP_RATIO, ...) \
+  do {                                                      \
+    if (comp_ratio == 32) {                                 \
+      constexpr int COMP_RATIO = 32;                        \
+      { __VA_ARGS__ }                                       \
+    } else if (comp_ratio == 16) {                          \
+      constexpr int COMP_RATIO = 16;                        \
+      { __VA_ARGS__ }                                       \
+    } else if (comp_ratio == 8) {                           \
+      constexpr int COMP_RATIO = 8;                         \
+      { __VA_ARGS__ }                                       \
+    } else if (comp_ratio == 4) {                           \
+      constexpr int COMP_RATIO = 4;                         \
+      { __VA_ARGS__ }                                       \
+    } else if (comp_ratio == 2) {                           \
+      constexpr int COMP_RATIO = 2;                         \
+      { __VA_ARGS__ }                                       \
+    } else if (comp_ratio == 1) {                           \
+      constexpr int COMP_RATIO = 1;                         \
+      { __VA_ARGS__ }                                       \
+    } else {                                                \
+      LOG(FATAL) << "Unsupported comp ratio " << comp_ratio \
+                 << "; must be one of 1,2,4,8,16,32";       \
+    }                                                       \
+  } while (0)
 
 using TensorDispatcher = dgl::runtime::TensorDispatcher;
 
@@ -158,14 +185,6 @@ __global__ void flag_kernel(
   }
 }
 
-//__global__ void popcnt_kernel(
-//    DeviceBitIterator iter, int64_t num_buckets, OffsetType *offset) {
-//  const int64_t tIdx = threadIdx.x + blockIdx.x * blockDim.x;
-//  if (tIdx < num_buckets) {
-//    offset[tIdx] = iter.popcnt(tIdx);
-//  }
-//}
-
 // This kernel is used to initialize the offset array.
 // The n-th element in the offset array stores the number of 1-bit
 // in the bitmap ranging from the CompRatio * n to CompRatio * (n + 1)-th
@@ -206,30 +225,6 @@ __global__ void cnt_kernel(
   }
 }
 
-// template <typename IdType>
-//__global__ void map_kernel(
-//     DeviceBitIterator iter, const OffsetType *offset, const IdType *row,
-//     int64_t num_rows, IdType *out_row) {
-//   const int64_t tIdx = threadIdx.x + blockIdx.x * blockDim.x;
-//   if (tIdx < num_rows) {
-//     const IdType id = row[tIdx];
-//     assert(iter[id] == true);
-//     const int64_t bucket_idx = id / BucketWidth;
-//     const int64_t num_bits = id % BucketWidth + 1;
-//     OffsetType start = offset[bucket_idx];
-//     const IdType loc_id = start + iter.popcnt(bucket_idx, num_bits);
-//     out_row[tIdx] = loc_id;
-//     // printf("tIdx: %lld start %d loc_id: %d num_bits: %d\n", tIdx, start,
-//     // loc_id, num_bits);
-//   }
-// }
-
-// assume each row id is handled by number of threads = CompRatio
-// This kernel is used to map each element in row to its corresponding local
-// index in the bitmap. For instance, suppose row[0]=10, and the iter[10] is the
-// second 1 bit in the bitmap, this function will map 10 to 1 and write that in
-// the out_row[0].
-
 template <typename IdType, int CompRatio>
 __global__ void map_kernel(
     DeviceBitIterator iter, const OffsetType *offset, const IdType *row,
@@ -251,13 +246,6 @@ __global__ void map_kernel(
     int32_t num_bits = std::max(
         0, std::min(BucketWidth, total_num_bits - tOffset * BucketWidth));
     ;
-    //    if (total_num_bits - tOffset * BucketWidth >= BucketWidth) {
-    //      num_bits = BucketWidth;
-    //    } else if (total_num_bits - tOffset * BucketWidth >= 0) {
-    //      num_bits = total_num_bits - tOffset * BucketWidth;
-    //    } else {
-    //      num_bits = 0;
-    //    }
 
     const int bitcnt = iter.popcnt(bucket_idx + tOffset, num_bits);
     const int group_id = threadIdx.x / CompRatio;
@@ -278,27 +266,6 @@ __global__ void read_kernel(DeviceBitIterator iter, int64_t num_items) {
     printf("tIdx: %lld mask %d\n", tIdx, flag);
   }
 }
-// assume prefix sum has been computed of the offset
-// and the offset has length equal to num_buckets + 1
-// output: the indices in bitmap marked as 1
-//template <typename IdType>
-//__global__ void unique_kernel(
-//    const BucketType *bitmap, int64_t num_buckets, OffsetType *offset,
-//    IdType *out_row) {
-//  assert(offset != nullptr);
-//  const int64_t tIdx = threadIdx.x + blockIdx.x * blockDim.x;
-//  if (tIdx < num_buckets) {
-//    const OffsetType start = offset[tIdx];
-//    BucketType bits = bitmap[tIdx];
-//    int cnt = 0;
-//    while (bits != 0) {
-//      const int lz = __clz(bits);
-//      out_row[start + cnt] = BucketWidth * tIdx + lz;
-//      cnt++;
-//      bits ^= BucketHighestBit >> lz;
-//    }
-//  }
-//}
 
 // assume prefix sum has been computed of the offset
 // and the offset has length equal to num_offsets
@@ -321,17 +288,12 @@ __global__ void unique_kernel(
     auto bits = bitmap[tIdx];
     auto cnt = __popc(bits);
     auto warp_id = threadIdx.x / CompRatio;
-    WarpScan (temp_storage[warp_id]).ExclusiveSum(cnt, cnt);
+    WarpScan(temp_storage[warp_id]).ExclusiveSum(cnt, cnt);
     auto out_idx = offset_start + cnt;
 
     while (bits != 0) {
       const int lz = __clz(bits);
       out_row[out_idx++] = BucketWidth * tIdx + lz;
-
-//      if (tIdx < 32) {
-//        printf("tIdx: %ld, bits: %d, cnt: %d, warp_id:%d, out_idx: %d, out_id %ld, start %d, end %d\n", tIdx, bits, cnt, warp_id, out_idx-1, BucketWidth * tIdx + lz, offset_start, offset_end);
-//      }
-
       bits ^= BucketHighestBit >> lz;
     }
   }
@@ -342,8 +304,10 @@ __global__ void unique_kernel(
 DeviceBitmap::DeviceBitmap(int64_t num_elems, DGLContext ctx, int comp_ratio) {
   _comp_ratio = comp_ratio;
   CHECK(_comp_ratio % 4 == 0 || _comp_ratio == 1);
-  _num_buckets = (num_elems + BucketWidth - 1) / BucketWidth;  // 32 bits per buckets
-  _num_buckets = _num_buckets + _comp_ratio - _num_buckets % _comp_ratio; // make it multiple on _comp_ratio
+  _num_buckets =
+      (num_elems + BucketWidth - 1) / BucketWidth;  // 32 bits per buckets
+  _num_buckets = _num_buckets + _comp_ratio -
+                 _num_buckets % _comp_ratio;  // make it multiple on _comp_ratio
   _num_offset = (_num_buckets + _comp_ratio - 1) / _comp_ratio + 1;
   _ctx = ctx;
   auto device = runtime::DeviceAPI::Get(_ctx);
@@ -359,7 +323,7 @@ DeviceBitmap::DeviceBitmap(int64_t num_elems, DGLContext ctx, int comp_ratio) {
 
 DeviceBitmap::~DeviceBitmap() {
   auto device = runtime::DeviceAPI::Get(_ctx);
-//  auto stream = runtime::getCurrentCUDAStream();
+  //  auto stream = runtime::getCurrentCUDAStream();
   CUDA_CALL(cudaEventSynchronize(_event));
   CUDA_CALL(cudaEventDestroy(_event));
   if (_bitmap) device->FreeWorkspace(_ctx, _bitmap);
@@ -371,7 +335,7 @@ void DeviceBitmap::reset() {
   auto device = runtime::DeviceAPI::Get(_ctx);
   auto stream = runtime::getCurrentCUDAStream();
   cudaMemsetAsync(_bitmap, 0, _num_buckets * sizeof(BucketType), stream);
-//  device->StreamSync(_ctx, stream);
+  //  device->StreamSync(_ctx, stream);
 }
 
 template <typename IdType>
@@ -387,45 +351,51 @@ void DeviceBitmap::flag(const IdType *row, int64_t num_rows) {
   _offset_built = false;
 }
 
+void DeviceBitmap::sync() { CUDA_CALL(cudaEventSynchronize(_event)); }
 
-int64_t DeviceBitmap::buildOffset() {
-  if (_offset_built) return _num_unique;
+void DeviceBitmap::buildOffset() {
+  if (_offset_built) return;
   auto device = runtime::DeviceAPI::Get(_ctx);
   auto stream = runtime::getCurrentCUDAStream();
   DeviceBitIterator iter(_bitmap, _num_buckets, 0);
 
   const dim3 block(BlockSize);
   const dim3 grid((_num_buckets + block.x - 1) / block.x);
-  switch (_comp_ratio) {
-    case 1:
-      CUDA_KERNEL_CALL(
-          impl::offset_kernel<1>, grid, block, 0, stream, iter, _num_buckets,
-          _offset);
-      break;
-    case 4:
-      CUDA_KERNEL_CALL(
-          impl::offset_kernel<4>, grid, block, 0, stream, iter, _num_buckets,
-          _offset);
-      break;
-    case 8:
-      CUDA_KERNEL_CALL(
-          impl::offset_kernel<8>, grid, block, 0, stream, iter, _num_buckets,
-          _offset);
-      break;
-    case 16:
-      CUDA_KERNEL_CALL(
-          impl::offset_kernel<16>, grid, block, 0, stream, iter, _num_buckets,
-          _offset);
-      break;
-    case 32:
-      CUDA_KERNEL_CALL(
-          impl::offset_kernel<32>, grid, block, 0, stream, iter, _num_buckets,
-          _offset);
-      break;
-    default:
-      LOG(ERROR) << "unsupported compression ratio, must be 1, 4, 8, 16, 32";
-      break;
-  }
+  ATEN_COMP_RATIO_SWITCH(_comp_ratio, COMP_RATIO, {
+    CUDA_KERNEL_CALL(
+        impl::offset_kernel<COMP_RATIO>, grid, block, 0, stream, iter,
+        _num_buckets, _offset);
+  });
+  //  switch (_comp_ratio) {
+  //    case 1:
+  //      CUDA_KERNEL_CALL(
+  //          impl::offset_kernel<1>, grid, block, 0, stream, iter,
+  //          _num_buckets, _offset);
+  //      break;
+  //    case 4:
+  //      CUDA_KERNEL_CALL(
+  //          impl::offset_kernel<4>, grid, block, 0, stream, iter,
+  //          _num_buckets, _offset);
+  //      break;
+  //    case 8:
+  //      CUDA_KERNEL_CALL(
+  //          impl::offset_kernel<8>, grid, block, 0, stream, iter,
+  //          _num_buckets, _offset);
+  //      break;
+  //    case 16:
+  //      CUDA_KERNEL_CALL(
+  //          impl::offset_kernel<16>, grid, block, 0, stream, iter,
+  //          _num_buckets, _offset);
+  //      break;
+  //    case 32:
+  //      CUDA_KERNEL_CALL(
+  //          impl::offset_kernel<32>, grid, block, 0, stream, iter,
+  //          _num_buckets, _offset);
+  //      break;
+  //    default:
+  //      LOG(ERROR) << "unsupported compression ratio, must be 1, 4, 8, 16,
+  //      32"; break;
+  //  }
   // use prefix sum to compute the indices
   size_t temp_storage_bytes = 0;
   auto d_in = _offset;
@@ -445,27 +415,16 @@ int64_t DeviceBitmap::buildOffset() {
     _temp_storage_bytes = temp_storage_bytes;
   };
 
-  NDArray new_len_tensor;
-  if (TensorDispatcher::Global()->IsAvailable()) {
-    new_len_tensor = NDArray::PinnedEmpty(
-        {1}, DGLDataTypeTraits<OffsetType>::dtype, DGLContext{kDGLCPU, 0});
-  } else {
-    // use pageable memory, it will unecessarily block but be functional
-    new_len_tensor = NDArray::Empty(
-        {1}, DGLDataTypeTraits<OffsetType>::dtype, DGLContext{kDGLCPU, 0});
-  }
   CUDA_CALL(cub::DeviceScan::ExclusiveSum(
       _d_temp_storage, temp_storage_bytes, d_in, d_out, num_items, stream));
-  CUDA_CALL(cudaMemcpyAsync(
-      new_len_tensor.Ptr<OffsetType>(), _offset + _num_offset - 1,
-      sizeof(OffsetType), cudaMemcpyDefault, stream));
 
   CUDA_CALL(cudaEventRecord(_event, stream));
-  CUDA_CALL(cudaEventSynchronize(_event));
-  device->StreamSync(_ctx, stream);
+  //  CUDA_CALL(cudaEventSynchronize(_event));
+  //  device->StreamSync(_ctx, stream);
+  //  _offset_built = true;
+  //  _num_unique = new_len_tensor.Ptr<OffsetType>()[0];
+  //  return _num_unique;
   _offset_built = true;
-  _num_unique = new_len_tensor.Ptr<OffsetType>()[0];
-  return _num_unique;
 }
 
 int64_t DeviceBitmap::numItem() const {
@@ -482,51 +441,72 @@ int64_t DeviceBitmap::numItem() const {
       impl::cnt_kernel, grid, block, 0, stream, iter, _num_buckets, d_num_item);
   CUDA_CALL(cudaMemcpyAsync(
       &h_num_item, d_num_item, sizeof(uint32_t), cudaMemcpyDeviceToHost,
-      stream));
+      stream))
   device->StreamSync(_ctx, stream);
   return h_num_item;
 }
 
 template <typename IdType>
 int64_t DeviceBitmap::unique(IdType *out_row) {
-  int64_t num_unique = buildOffset();
+  buildOffset();
   auto device = runtime::DeviceAPI::Get(_ctx);
   auto stream = runtime::getCurrentCUDAStream();
+
+  NDArray new_len_tensor;
+  if (TensorDispatcher::Global()->IsAvailable()) {
+    new_len_tensor = NDArray::PinnedEmpty(
+        {1}, DGLDataTypeTraits<OffsetType>::dtype, DGLContext{kDGLCPU, 0});
+  } else {
+    // use pageable memory, it will unecessarily block but be functional
+    new_len_tensor = NDArray::Empty(
+        {1}, DGLDataTypeTraits<OffsetType>::dtype, DGLContext{kDGLCPU, 0});
+  }
+  CUDA_CALL(cudaMemcpyAsync(
+      new_len_tensor.Ptr<OffsetType>(), _offset + _num_offset - 1,
+      sizeof(OffsetType), cudaMemcpyDefault, stream));
+
   const dim3 block(BlockSize);
   const dim3 grid((_num_buckets + block.x - 1) / block.x);
-  switch (_comp_ratio) {
-    case 1:
-      CUDA_KERNEL_CALL(
-          (impl::unique_kernel<IdType, 1>), grid, block, 0, stream, _bitmap, _num_buckets,
-          _offset, out_row);
-      break;
-    case 4:
-      CUDA_KERNEL_CALL(
-          (impl::unique_kernel<IdType, 4>), grid, block, 0, stream, _bitmap, _num_buckets,
-          _offset, out_row);
-      break;
-    case 8:
-      CUDA_KERNEL_CALL(
-          (impl::unique_kernel<IdType, 8>), grid, block, 0, stream, _bitmap, _num_buckets,
-          _offset, out_row);
-      break;
-    case 16:
-      CUDA_KERNEL_CALL(
-          (impl::unique_kernel<IdType, 16>), grid, block, 0, stream, _bitmap, _num_buckets,
-          _offset, out_row);
-      break;
-    case 32:
-      CUDA_KERNEL_CALL(
-          (impl::unique_kernel<IdType, 32>), grid, block, 0, stream, _bitmap, _num_buckets,
-          _offset, out_row);
-      break;
-    default:
-      LOG(ERROR) << "unsupported compression ratio, must be 1, 4, 8, 16, 32";
-      break;
-  }
+  ATEN_COMP_RATIO_SWITCH(_comp_ratio, COMP_RATIO, {
+    CUDA_KERNEL_CALL(
+        (impl::unique_kernel<IdType, COMP_RATIO>), grid, block, 0, stream,
+        _bitmap, _num_buckets, _offset, out_row);
+  });
+  //  switch (_comp_ratio) {
+  //    case 1:
+  //      CUDA_KERNEL_CALL(
+  //          (impl::unique_kernel<IdType, 1>), grid, block, 0, stream, _bitmap,
+  //          _num_buckets, _offset, out_row);
+  //      break;
+  //    case 4:
+  //      CUDA_KERNEL_CALL(
+  //          (impl::unique_kernel<IdType, 4>), grid, block, 0, stream, _bitmap,
+  //          _num_buckets, _offset, out_row);
+  //      break;
+  //    case 8:
+  //      CUDA_KERNEL_CALL(
+  //          (impl::unique_kernel<IdType, 8>), grid, block, 0, stream, _bitmap,
+  //          _num_buckets, _offset, out_row);
+  //      break;
+  //    case 16:
+  //      CUDA_KERNEL_CALL(
+  //          (impl::unique_kernel<IdType, 16>), grid, block, 0, stream,
+  //          _bitmap, _num_buckets, _offset, out_row);
+  //      break;
+  //    case 32:
+  //      CUDA_KERNEL_CALL(
+  //          (impl::unique_kernel<IdType, 32>), grid, block, 0, stream,
+  //          _bitmap, _num_buckets, _offset, out_row);
+  //      break;
+  //    default:
+  //      LOG(ERROR) << "unsupported compression ratio, must be 1, 4, 8, 16,
+  //      32"; break;
+  //  }
 
   device->StreamSync(_ctx, stream);
-  return num_unique;
+  _num_unique = new_len_tensor.Ptr<OffsetType>()[0];
+
+  return _num_unique;
 };
 
 template <typename IdType>
@@ -537,37 +517,43 @@ void DeviceBitmap::map(const IdType *row, int64_t num_rows, IdType *out_row) {
   const dim3 block(BlockSize);
   const dim3 grid((num_rows * _comp_ratio + block.x - 1) / block.x);
   DeviceBitIterator iter(_bitmap, _num_buckets, 0);
-  switch (_comp_ratio) {
-    case 1:
-      CUDA_KERNEL_CALL(
-          (impl::map_kernel<IdType, 1>), grid, block, 0, stream, iter, _offset,
-          row, num_rows, out_row);
-      break;
-    case 4:
-      CUDA_KERNEL_CALL(
-          (impl::map_kernel<IdType, 4>), grid, block, 0, stream, iter, _offset,
-          row, num_rows, out_row);
-      break;
-    case 8:
-      CUDA_KERNEL_CALL(
-          (impl::map_kernel<IdType, 8>), grid, block, 0, stream, iter, _offset,
-          row, num_rows, out_row);
-      break;
-    case 16:
-      CUDA_KERNEL_CALL(
-          (impl::map_kernel<IdType, 16>), grid, block, 0, stream, iter, _offset,
-          row, num_rows, out_row);
-      break;
-    case 32:
-      CUDA_KERNEL_CALL(
-          (impl::map_kernel<IdType, 32>), grid, block, 0, stream, iter, _offset,
-          row, num_rows, out_row);
-      break;
-    default:
-      LOG(ERROR) << "unsupported compression ratio, must be 1, 4, 8, 16, 32";
-      break;
-  }
-//  device->StreamSync(_ctx, stream);
+  ATEN_COMP_RATIO_SWITCH(_comp_ratio, COMP_RATIO, {
+    CUDA_KERNEL_CALL(
+        (impl::map_kernel<IdType, COMP_RATIO>), grid, block, 0, stream, iter,
+        _offset, row, num_rows, out_row);
+  });
+
+  // switch (_comp_ratio) {
+  //     case 1:
+  //       CUDA_KERNEL_CALL(
+  //           (impl::map_kernel<IdType, 1>), grid, block, 0, stream, iter,
+  //           _offset, row, num_rows, out_row);
+  //       break;
+  //     case 4:
+  //       CUDA_KERNEL_CALL(
+  //           (impl::map_kernel<IdType, 4>), grid, block, 0, stream, iter,
+  //           _offset, row, num_rows, out_row);
+  //       break;
+  //     case 8:
+  //       CUDA_KERNEL_CALL(
+  //           (impl::map_kernel<IdType, 8>), grid, block, 0, stream, iter,
+  //           _offset, row, num_rows, out_row);
+  //       break;
+  //     case 16:
+  //       CUDA_KERNEL_CALL(
+  //           (impl::map_kernel<IdType, 16>), grid, block, 0, stream, iter,
+  //           _offset, row, num_rows, out_row);
+  //       break;
+  //     case 32:
+  //       CUDA_KERNEL_CALL(
+  //           (impl::map_kernel<IdType, 32>), grid, block, 0, stream, iter,
+  //           _offset, row, num_rows, out_row);
+  //       break;
+  //     default:
+  //       LOG(ERROR) << "unsupported compression ratio, must be 1, 4, 8, 16,
+  //       32"; break;
+  //   }
+  //   device->StreamSync(_ctx, stream);
   CUDA_CALL(cudaEventRecord(_event, stream));
 };
 
