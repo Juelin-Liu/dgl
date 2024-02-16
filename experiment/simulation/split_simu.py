@@ -26,14 +26,15 @@ def simulate(config: Config, node_mode: str, edge_mode: str, bal: str):
         partition_map = torch.randint(low=0, high=config.num_partition, size=(v_num,), dtype=torch.int64)
 
     try:
-        spawn(_simulate, args=(config, graph, train_idx, partition_map, node_mode, edge_mode, bal),
+        unique_id = GetUniqueId()
+        spawn(_simulate, args=(config, unique_id, graph, train_idx, partition_map, node_mode, edge_mode, bal),
               nprocs=config.world_size)
     except Exception as e:
         print(f"error encountered with {config=}:", e)
         exit(-1)
 
 
-def _simulate(rank: int, config: Config, graph: dgl.DGLGraph, train_idx: torch.Tensor, partition_map: torch.Tensor,
+def _simulate(rank: int, config: Config, unique_id, graph: dgl.DGLGraph, train_idx: torch.Tensor, partition_map: torch.Tensor,
               node_mode: str, edge_mode: str, bal: str):
     ddp_setup(rank, config.world_size)
     device = torch.cuda.current_device()
@@ -52,8 +53,9 @@ def _simulate(rank: int, config: Config, graph: dgl.DGLGraph, train_idx: torch.T
     sample_config = SampleConfig(rank=rank, num_partition=config.num_partition, batch_size=config.batch_size * config.world_size,
                                  world_size=config.world_size, mode=mode, fanouts=config.fanouts, reindex=False,
                                  drop_last=True)
-    InitNccl(rank, config.world_size, "a magic message to avoid collision")
+
     dataloader = SplitGraphLoader(graph, partition_map, train_idx, sample_config)
+    InitNccl(rank, config.world_size, unique_id)
     step = 0
     step_per_epoch = dataloader.target_idx.shape[0] // dataloader.batch_size + 1
 
