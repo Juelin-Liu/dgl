@@ -245,10 +245,8 @@ void IndexSelect(
   const int64_t arr_len = array->shape[0];
   const int64_t len = in_index->shape[0];
   int64_t num_feat = 1;
-  //            std::vector<int64_t> shape{len};
   for (int d = 1; d < array->ndim; ++d) {
     num_feat *= array->shape[d];
-    //                shape.emplace_back(array->shape[d]);
   }
 
   ret->shape[1] = num_feat;

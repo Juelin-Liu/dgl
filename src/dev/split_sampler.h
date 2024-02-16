@@ -71,15 +71,16 @@ class SplitSampler {
       //      auto ctx = rows.at(0)->ctx;
       auto dtype = rows.at(0)->dtype;
       int64_t v_num = _csc.indptr.NumElements() - 1;
-      DeviceBitmap bitmap(v_num, _ctx);
+//      DeviceBitmap bitmap(v_num, _ctx);
+      auto bitmap = getBitmap(v_num, _ctx);
       ATEN_ID_TYPE_SWITCH(rows.at(0)->dtype, IdType, {
         int64_t num_input{0};
         for (auto const& row : rows) {
-          bitmap.flag(row.Ptr<IdType>(), row.NumElements());
+          bitmap->flag(row.Ptr<IdType>(), row.NumElements());
           num_input += row.NumElements();
         }
         NDArray ret = NDArray::Empty({num_input}, dtype, _ctx);
-        int64_t num_unique = bitmap.unique(ret.Ptr<IdType>());
+        int64_t num_unique = bitmap->unique(ret.Ptr<IdType>());
         return ret.CreateView({num_unique}, dtype);
       });
     } else {
@@ -190,8 +191,7 @@ class SplitSampler {
         frontiers.push_back(getUnique({frontier, block.col}));
       } else {
         auto unique_src = getUnique({frontier, block.col});
-        auto partition_idx = IndexSelect(
-            _partition_map, unique_src, runtime::getCurrentCUDAStream());
+        auto partition_idx = IndexSelect(_partition_map, unique_src, runtime::getCurrentCUDAStream());
         auto scatter_arr =
             ScatteredArray::Create(_v_num, _ctx, unique_src->dtype, _nccl_comm);
         // send remote frontiers to remote gpus
@@ -225,15 +225,16 @@ class SplitSampler {
         auto stream = runtime::getCurrentCUDAStream();
         if (_use_bitmap) {
           int64_t v_num = _csc.indptr.NumElements() - 1;
-          DeviceBitmap bitmap(v_num, _ctx);
-          bitmap.flag(all_nodes.Ptr<IdType>(), all_nodes.NumElements());
-          bitmap.buildOffset();
-          assert(bitmap.numItem() == num_input);
+//          DeviceBitmap bitmap(v_num, _ctx);
+          auto bitmap = getBitmap(_v_num, _ctx);
+          bitmap->flag(all_nodes.Ptr<IdType>(), all_nodes.NumElements());
+          bitmap->buildOffset();
+          assert(bitmap->numItem() == num_input);
           for (auto& block : batch->_blocks) {
-            bitmap.map(
+            bitmap->map(
                 block.col.Ptr<IdType>(), block.col.NumElements(),
                 block.col.Ptr<IdType>());
-            bitmap.map(
+            bitmap->map(
                 block.row.Ptr<IdType>(), block.row.NumElements(),
                 block.row.Ptr<IdType>());
           }

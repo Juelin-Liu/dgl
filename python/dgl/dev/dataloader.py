@@ -23,7 +23,7 @@ class GraphDataloader:
             self.device)
         self.idx_loader = IdxLoader(target_idx=self.target_idx,
                                      batch_size=self.batch_size,
-                                     drop_last=config.drop_last,
+                                     max_step_per_epoch=self.target_idx.shape[0] // self.batch_size,
                                      shuffle=True)
 
         self.iter = iter(self.idx_loader)

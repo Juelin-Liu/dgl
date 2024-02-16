@@ -303,52 +303,60 @@ __global__ void unique_kernel(
 
 DeviceBitmap::DeviceBitmap(int64_t num_elems, DGLContext ctx, int comp_ratio) {
   _comp_ratio = comp_ratio;
-  CHECK(_comp_ratio % 4 == 0 || _comp_ratio == 1);
-  _num_buckets =
-      (num_elems + BucketWidth - 1) / BucketWidth;  // 32 bits per buckets
+  _num_buckets = (num_elems + BucketWidth - 1) / BucketWidth;  // 32 bits per buckets
   _num_buckets = _num_buckets + _comp_ratio -
                  _num_buckets % _comp_ratio;  // make it multiple on _comp_ratio
   _num_offset = (_num_buckets + _comp_ratio - 1) / _comp_ratio + 1;
   _ctx = ctx;
   auto device = runtime::DeviceAPI::Get(_ctx);
   auto stream = runtime::getCurrentCUDAStream();
+  CUDA_CALL(cudaStreamCreateWithFlags(&_memset_stream, cudaStreamNonBlocking));
+//  _memset_stream = stream;
+  CUDA_CALL(cudaEventCreate(&_event));
+
   _bitmap = static_cast<BucketType *>(
       device->AllocWorkspace(ctx, _num_buckets * sizeof(BucketType)));
-  CUDA_CALL(
-      cudaMemsetAsync(_bitmap, 0, _num_buckets * sizeof(BucketType), stream));
+  CUDA_CALL(cudaMemsetAsync(_bitmap, 0, _num_buckets * sizeof(BucketType), _memset_stream));
+  CUDA_CALL(cudaEventRecord(_event, _memset_stream));
+  CUDA_CALL(cudaStreamWaitEvent(stream, _event)); // any further cuda call on runtime stream must wait until memset is completed
+
   _offset = static_cast<OffsetType *>(
       device->AllocWorkspace(ctx, _num_offset * sizeof(OffsetType)));
-  CUDA_CALL(cudaEventCreate(&_event));
+  _temp_storage_bytes = 1024 * 1024;
+  _d_temp_storage = device->AllocWorkspace(ctx, _temp_storage_bytes);
 }
 
 DeviceBitmap::~DeviceBitmap() {
   auto device = runtime::DeviceAPI::Get(_ctx);
-  //  auto stream = runtime::getCurrentCUDAStream();
-  CUDA_CALL(cudaEventSynchronize(_event));
-  CUDA_CALL(cudaEventDestroy(_event));
   if (_bitmap) device->FreeWorkspace(_ctx, _bitmap);
   if (_offset) device->FreeWorkspace(_ctx, _offset);
   if (_d_temp_storage) device->FreeWorkspace(_ctx, _d_temp_storage);
+  CUDA_CALL(cudaEventSynchronize(_event));
+  CUDA_CALL(cudaEventDestroy(_event));
+  CUDA_CALL(cudaStreamDestroy(_memset_stream));
 }
 
 void DeviceBitmap::reset() {
-  auto device = runtime::DeviceAPI::Get(_ctx);
+//  auto device = runtime::DeviceAPI::Get(_ctx);
+  _offset_built = false;
   auto stream = runtime::getCurrentCUDAStream();
-  cudaMemsetAsync(_bitmap, 0, _num_buckets * sizeof(BucketType), stream);
-  //  device->StreamSync(_ctx, stream);
+  CUDA_CALL(cudaStreamWaitEvent(_memset_stream, _event)); // must wait until all events have finished
+  CUDA_CALL(cudaMemsetAsync(_bitmap, 0, _num_buckets * sizeof(BucketType), _memset_stream));
+  CUDA_CALL(cudaEventRecord(_event, _memset_stream));
+  CUDA_CALL(cudaStreamWaitEvent(stream, _event)); // any further cuda call on runtime stream must wait until memset is completed
 }
 
 template <typename IdType>
 void DeviceBitmap::flag(const IdType *row, int64_t num_rows) {
   auto stream = runtime::getCurrentCUDAStream();
   auto device = runtime::DeviceAPI::Get(_ctx);
-
   const dim3 block(BlockSize);
   const dim3 grid((num_rows + block.x - 1) / block.x);
   DeviceBitIterator iter(_bitmap, _num_buckets, 0);
   CUDA_KERNEL_CALL(
       impl::flag_kernel, grid, block, 0, stream, iter, row, num_rows);
   _offset_built = false;
+  CUDA_CALL(cudaEventRecord(_event, stream));
 }
 
 void DeviceBitmap::sync() { CUDA_CALL(cudaEventSynchronize(_event)); }
@@ -357,6 +365,8 @@ void DeviceBitmap::buildOffset() {
   if (_offset_built) return;
   auto device = runtime::DeviceAPI::Get(_ctx);
   auto stream = runtime::getCurrentCUDAStream();
+//  CUDA_CALL(cudaStreamWaitEvent(stream, _event));
+
   DeviceBitIterator iter(_bitmap, _num_buckets, 0);
 
   const dim3 block(BlockSize);
@@ -366,37 +376,7 @@ void DeviceBitmap::buildOffset() {
         impl::offset_kernel<COMP_RATIO>, grid, block, 0, stream, iter,
         _num_buckets, _offset);
   });
-  //  switch (_comp_ratio) {
-  //    case 1:
-  //      CUDA_KERNEL_CALL(
-  //          impl::offset_kernel<1>, grid, block, 0, stream, iter,
-  //          _num_buckets, _offset);
-  //      break;
-  //    case 4:
-  //      CUDA_KERNEL_CALL(
-  //          impl::offset_kernel<4>, grid, block, 0, stream, iter,
-  //          _num_buckets, _offset);
-  //      break;
-  //    case 8:
-  //      CUDA_KERNEL_CALL(
-  //          impl::offset_kernel<8>, grid, block, 0, stream, iter,
-  //          _num_buckets, _offset);
-  //      break;
-  //    case 16:
-  //      CUDA_KERNEL_CALL(
-  //          impl::offset_kernel<16>, grid, block, 0, stream, iter,
-  //          _num_buckets, _offset);
-  //      break;
-  //    case 32:
-  //      CUDA_KERNEL_CALL(
-  //          impl::offset_kernel<32>, grid, block, 0, stream, iter,
-  //          _num_buckets, _offset);
-  //      break;
-  //    default:
-  //      LOG(ERROR) << "unsupported compression ratio, must be 1, 4, 8, 16,
-  //      32"; break;
-  //  }
-  // use prefix sum to compute the indices
+
   size_t temp_storage_bytes = 0;
   auto d_in = _offset;
   auto d_out = _offset;
@@ -419,17 +399,15 @@ void DeviceBitmap::buildOffset() {
       _d_temp_storage, temp_storage_bytes, d_in, d_out, num_items, stream));
 
   CUDA_CALL(cudaEventRecord(_event, stream));
-  //  CUDA_CALL(cudaEventSynchronize(_event));
-  //  device->StreamSync(_ctx, stream);
-  //  _offset_built = true;
-  //  _num_unique = new_len_tensor.Ptr<OffsetType>()[0];
-  //  return _num_unique;
+
   _offset_built = true;
 }
 
 int64_t DeviceBitmap::numItem() const {
   auto device = runtime::DeviceAPI::Get(_ctx);
   auto stream = runtime::getCurrentCUDAStream();
+//  CUDA_CALL(cudaStreamWaitEvent(stream, _event));
+
   const dim3 block(BlockSize);
   const dim3 grid((_num_buckets + block.x - 1) / block.x);
   DeviceBitIterator iter(_bitmap, _num_buckets, 0);
@@ -442,7 +420,7 @@ int64_t DeviceBitmap::numItem() const {
   CUDA_CALL(cudaMemcpyAsync(
       &h_num_item, d_num_item, sizeof(uint32_t), cudaMemcpyDeviceToHost,
       stream))
-  device->StreamSync(_ctx, stream);
+  device->StreamSync(_ctx, stream); // don't need to record event
   return h_num_item;
 }
 
@@ -451,6 +429,7 @@ int64_t DeviceBitmap::unique(IdType *out_row) {
   buildOffset();
   auto device = runtime::DeviceAPI::Get(_ctx);
   auto stream = runtime::getCurrentCUDAStream();
+//  CUDA_CALL(cudaStreamWaitEvent(stream, _event));
 
   NDArray new_len_tensor;
   if (TensorDispatcher::Global()->IsAvailable()) {
@@ -472,38 +451,8 @@ int64_t DeviceBitmap::unique(IdType *out_row) {
         (impl::unique_kernel<IdType, COMP_RATIO>), grid, block, 0, stream,
         _bitmap, _num_buckets, _offset, out_row);
   });
-  //  switch (_comp_ratio) {
-  //    case 1:
-  //      CUDA_KERNEL_CALL(
-  //          (impl::unique_kernel<IdType, 1>), grid, block, 0, stream, _bitmap,
-  //          _num_buckets, _offset, out_row);
-  //      break;
-  //    case 4:
-  //      CUDA_KERNEL_CALL(
-  //          (impl::unique_kernel<IdType, 4>), grid, block, 0, stream, _bitmap,
-  //          _num_buckets, _offset, out_row);
-  //      break;
-  //    case 8:
-  //      CUDA_KERNEL_CALL(
-  //          (impl::unique_kernel<IdType, 8>), grid, block, 0, stream, _bitmap,
-  //          _num_buckets, _offset, out_row);
-  //      break;
-  //    case 16:
-  //      CUDA_KERNEL_CALL(
-  //          (impl::unique_kernel<IdType, 16>), grid, block, 0, stream,
-  //          _bitmap, _num_buckets, _offset, out_row);
-  //      break;
-  //    case 32:
-  //      CUDA_KERNEL_CALL(
-  //          (impl::unique_kernel<IdType, 32>), grid, block, 0, stream,
-  //          _bitmap, _num_buckets, _offset, out_row);
-  //      break;
-  //    default:
-  //      LOG(ERROR) << "unsupported compression ratio, must be 1, 4, 8, 16,
-  //      32"; break;
-  //  }
 
-  device->StreamSync(_ctx, stream);
+  device->StreamSync(_ctx, stream); // don't need to record event
   _num_unique = new_len_tensor.Ptr<OffsetType>()[0];
 
   return _num_unique;
@@ -514,6 +463,8 @@ void DeviceBitmap::map(const IdType *row, int64_t num_rows, IdType *out_row) {
   buildOffset();
   auto device = runtime::DeviceAPI::Get(_ctx);
   auto stream = runtime::getCurrentCUDAStream();
+//  CUDA_CALL(cudaStreamWaitEvent(stream, _event));
+
   const dim3 block(BlockSize);
   const dim3 grid((num_rows * _comp_ratio + block.x - 1) / block.x);
   DeviceBitIterator iter(_bitmap, _num_buckets, 0);
@@ -523,37 +474,6 @@ void DeviceBitmap::map(const IdType *row, int64_t num_rows, IdType *out_row) {
         _offset, row, num_rows, out_row);
   });
 
-  // switch (_comp_ratio) {
-  //     case 1:
-  //       CUDA_KERNEL_CALL(
-  //           (impl::map_kernel<IdType, 1>), grid, block, 0, stream, iter,
-  //           _offset, row, num_rows, out_row);
-  //       break;
-  //     case 4:
-  //       CUDA_KERNEL_CALL(
-  //           (impl::map_kernel<IdType, 4>), grid, block, 0, stream, iter,
-  //           _offset, row, num_rows, out_row);
-  //       break;
-  //     case 8:
-  //       CUDA_KERNEL_CALL(
-  //           (impl::map_kernel<IdType, 8>), grid, block, 0, stream, iter,
-  //           _offset, row, num_rows, out_row);
-  //       break;
-  //     case 16:
-  //       CUDA_KERNEL_CALL(
-  //           (impl::map_kernel<IdType, 16>), grid, block, 0, stream, iter,
-  //           _offset, row, num_rows, out_row);
-  //       break;
-  //     case 32:
-  //       CUDA_KERNEL_CALL(
-  //           (impl::map_kernel<IdType, 32>), grid, block, 0, stream, iter,
-  //           _offset, row, num_rows, out_row);
-  //       break;
-  //     default:
-  //       LOG(ERROR) << "unsupported compression ratio, must be 1, 4, 8, 16,
-  //       32"; break;
-  //   }
-  //   device->StreamSync(_ctx, stream);
   CUDA_CALL(cudaEventRecord(_event, stream));
 };
 

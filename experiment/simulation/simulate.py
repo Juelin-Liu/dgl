@@ -5,12 +5,14 @@ import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.multiprocessing import spawn
 from node.utils import *
-from dgl.dev import *
+from dgl.dev.dataloader import *
 
 def load_partition_map(config:Config, node_mode: str, edge_mode: str, bal: str, num_partitions=4):
     in_dir = os.path.join(config.data_dir, "partition_ids", config.graph_name)
     file_name = f"{config.graph_name}_w{num_partitions}_n{node_mode}_e{edge_mode}_{bal}.pt"
-    return torch.load(os.path.join(in_dir, file_name)).type(torch.int64)
+    print(f"using {file_name} as partition map ")
+
+    return torch.load(os.path.join(in_dir, file_name)).type(torch.uint8)
 
 def simulate(config: Config, node_mode: str, edge_mode: str, bal: str):
     graph, train_idx, valid_idx, test_idx = load_topo(config, is_pinned=True)
@@ -18,8 +20,9 @@ def simulate(config: Config, node_mode: str, edge_mode: str, bal: str):
     if node_mode != "random":
         partition_map = load_partition_map(config, node_mode, edge_mode, bal)
     else:
+        print(f"using random with {config.num_partition} partitions")
         v_num = graph.num_nodes()
-        partition_map = torch.randint(low=0, high=config.world_size,size=(v_num,),dtype=torch.int64)
+        partition_map = torch.randint(low=0, high=config.num_partition, size=(v_num,), dtype=torch.uint8)
     try:
         spawn(_simulate, args=(config, graph, train_idx, partition_map, node_mode, edge_mode, bal), nprocs=config.world_size)
     except Exception as e:
@@ -40,7 +43,7 @@ def _simulate(rank: int, config: Config, graph: dgl.DGLGraph, train_idx: torch.T
     else:
         graph = graph.to(rank)
         mode = "gpu"
-    sample_config = SampleConfig(rank=rank, batch_size=config.batch_size * config.world_size, world_size=config.world_size, mode=mode, fanouts=config.fanouts, reindex=False, drop_last=True)
+    sample_config = SampleConfig(rank=rank, num_partition=config.num_partition, batch_size=config.batch_size * config.world_size, world_size=config.world_size, mode=mode, fanouts=config.fanouts, reindex=False, drop_last=True)
     dataloader = GraphDataloader(graph, train_idx, sample_config)
     step = 0
     step_per_epoch = dataloader.target_idx.shape[0] // dataloader.batch_size + 1

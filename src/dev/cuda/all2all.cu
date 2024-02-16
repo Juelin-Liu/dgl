@@ -68,8 +68,6 @@ NDArray NCCLAllToAll(
   const auto expand_size = input.NumElements() / input->shape[0];
   const auto send_offset_ptr = send_indptr.Ptr<IdType>();
   const auto recv_offset_ptr = recv_indptr.Ptr<IdType>();
-  CUDA_CALL(cudaStreamSynchronize(stream));
-
   const auto recv_num = recv_indptr.Ptr<IdType>()[world_size] * expand_size;
   NDArray ret = NDArray::Empty({recv_num}, input->dtype, input->ctx);
 //  LOG(INFO) << "rank: " << rank << " ret buffer size " << recv_num << " ctx: " << ret->ctx;
@@ -96,7 +94,7 @@ NDArray NCCLAllToAll(
     ncclGroupEnd();
   });
 
-  CUDA_CALL(cudaStreamSynchronize(stream));
+//  CUDA_CALL(cudaStreamSynchronize(stream));
   return ret;
 }
 
@@ -109,8 +107,9 @@ std::pair<IdArray, IdArray> Alltoall(
   CHECK(send_offset->data != nullptr);
   auto send_sizes = Diff(send_offset);
   auto host_ctx = DGLContext{kDGLCPU, 0};
-  auto host_send_offset = send_offset.CopyTo(host_ctx);
+  auto host_send_offset = send_offset.CopyTo(host_ctx); // blocking
 //  LOG(INFO) << "send sizes: " << send_sizes;
+//  CUDA_CALL(cudaStreamSynchronize(stream));
 
   if (aten::IsNullArray(recv_offset)) {
     auto comm_offset =
@@ -121,7 +120,7 @@ std::pair<IdArray, IdArray> Alltoall(
     recv_offset = aten::CumSum(recv_sizes, true);
   }
 
-  auto host_recv_offset = recv_offset.CopyTo(host_ctx);
+  auto host_recv_offset = recv_offset.CopyTo(host_ctx); // blocking
 //  LOG(INFO) << "recv offset: " << recv_offset;
 
   auto retbuff = NCCLAllToAll(

@@ -18,29 +18,33 @@
 namespace dgl::dev {
 using namespace runtime;
 
-// Index type should be 64 bits for all 2 all
-//typedef int64_t IndexType;
+#define ATEN_PIDX_TYPE_SWITCH(val, PIDType, ...)                   \
+  do {                                                          \
+    CHECK_EQ((val).code, kDGLInt) << "ID must be integer type";   \
+    if ((val).bits == 8) {                                                          \
+      typedef int8_t PIDType;                                     \
+      {__VA_ARGS__} \
+    } else if ((val).bits == 16) {                                     \
+      typedef int16_t PIDType;                                   \
+      { __VA_ARGS__ }                                           \
+    } else if ((val).bits == 32) {                                     \
+      typedef int32_t PIDType;                                   \
+      { __VA_ARGS__ }                                           \
+    } else if ((val).bits == 64) {                              \
+      typedef int64_t PIDType;                                   \
+      { __VA_ARGS__ }                                           \
+    } else {                                                    \
+      LOG(FATAL) << "Partition index can only be, int8_t, int16_t, int32 or int64";            \
+    }                                                           \
+  } while (0)
 
 template <typename IndexType>
 std::tuple<IdArray, IdArray, IdArray> compute_partition_continuous_indices(
     IdArray partition_map, int num_partitions, cudaStream_t stream) {
-  std::tuple<IdArray, IdArray, IdArray> ret;
-  ATEN_ID_TYPE_SWITCH(partition_map->dtype, IdType, {
-    ret = compute_partition_continuous_indices<kDGLCUDA, IndexType, IdType>(
+  ATEN_PIDX_TYPE_SWITCH(partition_map->dtype, PIDType, {
+    return compute_partition_continuous_indices<kDGLCUDA, IndexType, PIDType>(
         partition_map, num_partitions, stream);
   });
-  return ret;
-}
-
-std::tuple<IdArray, IdArray, IdArray>
-compute_partition_continuous_indices_strawman(
-    const IdArray &partition_map, int num_partitions, cudaStream_t stream) {
-  std::tuple<IdArray, IdArray, IdArray> ret;
-  ATEN_ID_TYPE_SWITCH(partition_map->dtype, IdType, {
-    ret = compute_partition_continuous_indices_strawman<kDGLCUDA, IdType>(
-        partition_map, num_partitions, stream);
-  });
-  return ret;
 }
 
 IdArray gather_atomic_accumulation(
@@ -170,16 +174,17 @@ void Scatter(
       aten::NullArray(), stream, array->_nccl_comm);
 //  LOG(INFO) << "rank " << rank << " start mapping";
   ATEN_ID_TYPE_SWITCH(array->global_src->dtype, IdType, {
-    auto bitmap = DeviceBitmap(array->_v_num, ctx);
-    bitmap.flag(
+//    auto bitmap = DeviceBitmap(array->_v_num, ctx);
+    auto bitmap = getBitmap(array->_v_num, ctx);
+    bitmap->flag(
         array->global_src.Ptr<IdType>(), array->global_src.NumElements());
     NDArray unique_arr =
         NDArray::Empty({array->global_src.NumElements()}, dtype, ctx);
     array->gather_idx_in_unique_out_shuffled =
         NDArray::Empty({array->global_src.NumElements()}, dtype, ctx);
 
-    array->_unique_dim = bitmap.unique(unique_arr.Ptr<IdType>());
-    bitmap.map(array->global_src.Ptr<IdType>(),array->global_src.NumElements(),
+    array->_unique_dim = bitmap->unique(unique_arr.Ptr<IdType>());
+    bitmap->map(array->global_src.Ptr<IdType>(),array->global_src.NumElements(),
                array->gather_idx_in_unique_out_shuffled.Ptr<IdType>());
     array->unique_array = unique_arr.CreateView({array->_unique_dim}, dtype);
   });

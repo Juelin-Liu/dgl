@@ -111,16 +111,15 @@ namespace dgl::dev
   // such that IndexSelect (F, gather_idx) will result in partition continuos ids
   template <DGLDeviceType XPU, typename IndexType, typename PIdType>
   std::tuple<IdArray,IdArray,IdArray>
-  compute_partition_continuous_indices(IdArray partition_map, \
+  compute_partition_continuous_indices(IdArray partition_idx, \
                                        int num_partitions,cudaStream_t stream) {
     // uint8_t nbits = 32;
-    CHECK_EQ(partition_map->ndim , 1);
+    CHECK_EQ(partition_idx->ndim , 1);
     auto index_data_type = DGLDataTypeTraits<IndexType>::dtype;
-    IdArray expanded_index_out = aten::Full<IndexType>(
-        0, partition_map->shape[0] * num_partitions, partition_map->ctx);
-    size_t partition_map_size = partition_map->shape[0];
+    IdArray expanded_index_out = aten::Full<IndexType>(0, partition_idx->shape[0] * num_partitions, partition_idx->ctx);
+    size_t partition_map_size = partition_idx->shape[0];
 
-    const PIdType *partition_map_idx = partition_map.Ptr<PIdType>();
+    const PIdType *partition_map_idx = partition_idx.Ptr<PIdType>();
     IndexType *expanded_idx_ptr = expanded_index_out.Ptr<IndexType>();
 
     int nt = cuda::FindNumThreads(partition_map_size);
@@ -128,24 +127,32 @@ namespace dgl::dev
     CUDA_KERNEL_CALL(scatter_partition_continuous_index_kernel, nb, nt, 0, stream,
                      partition_map_idx, partition_map_size, expanded_idx_ptr ,
                      num_partitions);
-    size_t workspace_size = 0;
-    auto device = runtime::DeviceAPI::Get(partition_map->ctx);
+
+    static void * workspace{nullptr};
+    static size_t workspace_size{0};
+
+    size_t new_workspace_size = 0;
+    auto device = runtime::DeviceAPI::Get(partition_idx->ctx);
     CUDA_CALL(cub::DeviceScan::InclusiveSum(
-        nullptr, workspace_size, expanded_idx_ptr , expanded_idx_ptr ,
+        nullptr, new_workspace_size, expanded_idx_ptr , expanded_idx_ptr ,
         partition_map_size * num_partitions, stream));
-    void *workspace = device->AllocWorkspace(partition_map->ctx, workspace_size);
+
+    if (new_workspace_size > workspace_size || workspace == nullptr) {
+      constexpr int round_size = 1024 * 1024; // round to multiple of 1MB
+      size_t num_block = (new_workspace_size + round_size - 1) / round_size;
+      workspace_size = num_block * round_size;
+      workspace = device->AllocWorkspace(partition_idx->ctx, workspace_size);
+    }
+
     CUDA_CALL(cub::DeviceScan::InclusiveSum(
         workspace, workspace_size, expanded_idx_ptr ,expanded_idx_ptr ,
         partition_map_size * num_partitions, stream));
-    device->FreeWorkspace(partition_map->ctx, workspace);
-    cudaStreamSynchronize(stream);
-
 
     IdArray gather_idx_in_part_disc_cont =
-        IdArray::Empty({partition_map->shape[0]}, index_data_type, partition_map->ctx);
+        IdArray::Empty({partition_idx->shape[0]}, index_data_type, partition_idx->ctx);
     IdArray scatter_idx_in_part_disc_cont =
-        IdArray::Empty({partition_map->shape[0]}, index_data_type, partition_map->ctx);
-    IdArray boundary_offsets = IdArray::Empty({num_partitions + 1}, index_data_type, partition_map->ctx);
+        IdArray::Empty({partition_idx->shape[0]}, index_data_type, partition_idx->ctx);
+    IdArray boundary_offsets = IdArray::Empty({num_partitions + 1}, index_data_type, partition_idx->ctx);
 
 
     IndexType *gather_idx_ptr = gather_idx_in_part_disc_cont.Ptr<IndexType>();
@@ -155,103 +162,47 @@ namespace dgl::dev
     nb = (expanded_index_out->shape[0] + nt - 1) / nt;
 
     CUDA_KERNEL_CALL(compute_partition_continuous_index_kernel, nb, nt, 0, stream,
-                     partition_map->shape[0], expanded_idx_ptr,
+        partition_idx->shape[0], expanded_idx_ptr,
                      expanded_index_out->shape[0], gather_idx_ptr, scatter_idx_ptr,
                      boundary_offsets_ptr);
 
+//    device->FreeWorkspace(partition_idx->ctx, workspace);
+//    cudaStreamSynchronize(stream);
     return std::tuple(boundary_offsets, gather_idx_in_part_disc_cont, scatter_idx_in_part_disc_cont);
 
   }
-
-
-  template <DGLDeviceType XPU, typename PIdType>
-  std::tuple<IdArray,IdArray,IdArray>
-  compute_partition_continuous_indices_strawman(IdArray partition_map, \
-                                                int num_partitions,cudaStream_t stream) {
-    typedef PIdType IndexType;
-    int num_items = partition_map->shape[0];
-    // Declare, allocate, and initialize device-accessible pointers for sorting data
-    // e.g., 7
-    PIdType  *d_key_buf = partition_map.Ptr<PIdType>();         // e.g., [8, 6, 7, 5, 3, 0, 9]
-    IdArray d_key_buf_array_partition = IdArray::Empty({num_items}, partition_map->dtype, partition_map->ctx);
-    PIdType  *d_key_alt_buf_partition = d_key_buf_array_partition.Ptr<PIdType>();     // e.g., [        ...        ]
-    auto index_data_type = DGLDataTypeTraits<IndexType>::dtype;
-    IdArray range = aten::Range(0, num_items, index_data_type.bits, partition_map->ctx);       // e.g., [0, 1, 2, 3, 4, 5, 6]
-    IndexType * d_value_buf = range.Ptr<IndexType>();
-    IdArray gather_idx_in_part_disc_cont = IdArray::Empty({num_items}, partition_map->dtype, partition_map->ctx);
-    IndexType  *d_value_alt_buf = gather_idx_in_part_disc_cont.Ptr<IndexType>(); // e.g., [        ...        ]
-                                                                                 //
-                                                                                 //          // Create a set of DoubleBuffers to wrap pairs of device pointers
-    cub::DoubleBuffer<PIdType> d_keys1(d_key_buf, d_key_alt_buf_partition);
-    cub::DoubleBuffer<IndexType> d_values1(d_value_buf, d_value_alt_buf);
-    void     *d_temp_storage = NULL;
-    size_t   temp_storage_bytes = 0;
-
-    cub::DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, d_keys1, d_values1, num_items, 0, index_data_type.bits, stream);
-    auto device = runtime::DeviceAPI::Get(partition_map->ctx);
-    d_temp_storage = device->AllocWorkspace(partition_map->ctx,temp_storage_bytes);
-
-    //          // Run sorting operation
-    cub::DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, d_keys1, d_values1, num_items,  0, index_data_type.bits, stream);
-    device->FreeWorkspace(partition_map->ctx, d_temp_storage);
-
-    //
-    d_key_buf = d_value_alt_buf;
-    IdArray d_key_buf_array = IdArray::Empty({num_items}, partition_map->dtype, partition_map->ctx);
-    PIdType  *d_key_alt_buf = d_key_buf_array.Ptr<PIdType>();     // e.g., [        ...
-    IdArray scatter_idx_in_part_disc_cont = aten::Range(0, num_items, index_data_type.bits, partition_map->ctx);       // e.g., [0, 1, 2, 3, 4, 5, 6]
-    d_value_buf = range.Ptr<IndexType>();
-    d_value_alt_buf = scatter_idx_in_part_disc_cont.Ptr<IndexType>();
-    //
-    cub::DoubleBuffer<PIdType> d_keys2(d_key_buf, d_key_alt_buf);
-    cub::DoubleBuffer<IndexType> d_values2(d_value_buf, d_value_alt_buf);
-    //
-    cub::DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, d_keys2, d_values2, num_items, 0, index_data_type.bits, stream);
-    d_temp_storage = device->AllocWorkspace(partition_map->ctx,temp_storage_bytes);
-
-    cub::DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, d_keys2, d_values2, num_items, 0, index_data_type.bits, stream);
-    device->FreeWorkspace(partition_map->ctx, d_temp_storage);
-
-
-    //        Sorting upper bound kernel compute boudary offsets;
-    IdArray needle = IdArray::FromVector(std::vector<IndexType >{0,1,2,3}, partition_map->ctx);
-    IdArray boundary_offsets = IdArray::FromVector(std::vector<int64_t>{0,0,0,0,0}, partition_map->ctx);
-
-    const int nt = cuda::FindNumThreads(4);
-    const int nb = (4 + nt - 1) / nt;
-    CUDA_KERNEL_CALL(
-        _SortedSearchKernelUpperBound, nb, nt, 0, stream,  d_key_buf_array_partition.Ptr<IndexType>(),
-        num_items, needle.Ptr<IndexType>(), 4, boundary_offsets.Ptr<int64_t>() + 1);
-    //          const IdType* hay, int64_t hay_size, const IdType* needles,
-    //              int64_t num_needles, IdType* pos
-    return std::tuple(boundary_offsets, gather_idx_in_part_disc_cont, scatter_idx_in_part_disc_cont);
-  }
-
   template
       std::tuple<IdArray,IdArray,IdArray>
-      compute_partition_continuous_indices<DGLDeviceType::kDGLCUDA, int32_t ,int64_t>(IdArray partition_map, \
+      compute_partition_continuous_indices<DGLDeviceType::kDGLCUDA, int32_t ,int8_t >(IdArray partition_idx, \
                                                                                       int num_partitions,cudaStream_t stream);
   template
       std::tuple<IdArray,IdArray,IdArray>
-      compute_partition_continuous_indices<DGLDeviceType::kDGLCUDA, int64_t ,int64_t>(IdArray partition_map, \
+      compute_partition_continuous_indices<DGLDeviceType::kDGLCUDA, int64_t ,int8_t >(IdArray partition_idx, \
+                                                                                      int num_partitions,cudaStream_t stream);
+  template
+      std::tuple<IdArray,IdArray,IdArray>
+      compute_partition_continuous_indices<DGLDeviceType::kDGLCUDA, int32_t ,int16_t >(IdArray partition_idx, \
+                                                                                     int num_partitions,cudaStream_t stream);
+  template
+      std::tuple<IdArray,IdArray,IdArray>
+      compute_partition_continuous_indices<DGLDeviceType::kDGLCUDA, int64_t ,int16_t >(IdArray partition_idx, \
+                                                                                     int num_partitions,cudaStream_t stream);
+  template
+      std::tuple<IdArray,IdArray,IdArray>
+      compute_partition_continuous_indices<DGLDeviceType::kDGLCUDA, int32_t ,int64_t>(IdArray partition_idx, \
+                                                                                      int num_partitions,cudaStream_t stream);
+  template
+      std::tuple<IdArray,IdArray,IdArray>
+      compute_partition_continuous_indices<DGLDeviceType::kDGLCUDA, int64_t ,int64_t>(IdArray partition_idx, \
                                                                                       int num_partitions,cudaStream_t stream);
 
 
   template
       std::tuple<IdArray,IdArray,IdArray>
-      compute_partition_continuous_indices<DGLDeviceType::kDGLCUDA, int32_t ,int32_t>(IdArray partition_map, \
+      compute_partition_continuous_indices<DGLDeviceType::kDGLCUDA, int32_t ,int32_t>(IdArray partition_idx, \
                                                                                       int num_partitions,cudaStream_t stream);
   template
       std::tuple<IdArray,IdArray,IdArray>
-      compute_partition_continuous_indices<DGLDeviceType::kDGLCUDA, int64_t ,int32_t>(IdArray partition_map, \
+      compute_partition_continuous_indices<DGLDeviceType::kDGLCUDA, int64_t ,int32_t>(IdArray partition_idx, \
                                                                                       int num_partitions,cudaStream_t stream);
-  template
-      std::tuple<IdArray,IdArray,IdArray>
-      compute_partition_continuous_indices_strawman<DGLDeviceType::kDGLCUDA, int64_t >(IdArray partition_map, \
-                                                                                      int num_partitions,cudaStream_t stream);
-  template
-      std::tuple<IdArray,IdArray,IdArray>
-      compute_partition_continuous_indices_strawman<DGLDeviceType::kDGLCUDA, int32_t >(IdArray partition_map, \
-                                                                                      int num_partitions,cudaStream_t stream);
-
 }

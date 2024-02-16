@@ -31,33 +31,26 @@ class SampleConfig:
 
 
 class IdxLoader:
-    def __init__(self, target_idx: Tensor, batch_size: int, shuffle: bool, drop_last: bool = True):
+    def __init__(self, target_idx: Tensor, batch_size: int, shuffle: bool, max_step_per_epoch: int):
         assert (target_idx.device != device("cpu"))
         self.nids = target_idx
         self.batch_size = batch_size
         self.shuffle = shuffle
-        self.drop_last = drop_last
-        self.cur_idx = 0
+        self.max_step_per_epoch = max_step_per_epoch
+        self.cur_step = 0
+        assert(max_step_per_epoch * batch_size <= target_idx.shape[0])
 
     def __iter__(self):
-        self.cur_idx = 0
+        self.cur_step = 0
         if self.shuffle:
-            print("start shuffling")
             idx = randperm(self.nids.shape[0])
             self.nids = self.nids[idx].clone()
         return self
 
     def __next__(self):
-        if self.drop_last:
-            if self.cur_idx + self.batch_size < self.nids.shape[0]:
-                seeds = self.nids[self.cur_idx: self.cur_idx + self.batch_size]
-                self.cur_idx += self.batch_size
-                return seeds
-            else:
-                raise StopIteration
-        elif self.cur_idx < self.nids.shape[0] - 1:
-            seeds = self.nids[self.cur_idx: self.cur_idx + self.batch_size]
-            self.cur_idx += self.batch_size
+        if self.cur_step < self.max_step_per_epoch:
+            seeds = self.nids[self.cur_step * self.batch_size: (self.cur_step + 1) * self.batch_size]
+            self.cur_step += 1
             return seeds
         else:
             raise StopIteration
