@@ -1,4 +1,4 @@
-from dgl.dev import *
+from dgl.dev.dataloader import *
 from node.utils import load_topo, Config, Timer
 import argparse
 import torch
@@ -34,7 +34,8 @@ if __name__ == "__main__":
 
     config = Config(graph_name=graph_name,
                     world_size=1,
-                    num_epoch=1,
+                    num_epoch=args.num_epoch,
+                    num_partition=1,
                     fanouts=fanouts,
                     batch_size=batch_size,
                     system="dgl",
@@ -50,7 +51,9 @@ if __name__ == "__main__":
     elif mode == "gpu":
         graph = graph.to(0)
 
-    sample_config = SampleConfig(rank=0, batch_size=config.batch_size * config.world_size, world_size=config.world_size, mode=mode, fanouts=config.fanouts, reindex=True, drop_last=True)
+    sample_config = SampleConfig(rank=0, num_partition=config.num_partition, batch_size=config.batch_size,
+                                 world_size=config.world_size, mode=mode, fanouts=config.fanouts, reindex=False,
+                                 drop_last=True)
     dataloader = GraphDataloader(graph, train_idx, sample_config)
     UseBitmap(use_bitmap)
 
