@@ -261,7 +261,7 @@ __global__ void map_kernel(
     const IdType id = row[rIdx];
     assert(iter[id] == true);
     const int32_t bucket_idx = id / BucketWidth;
-    const int32_t total_num_bits = id % (BucketWidth * CompRatio) + 1;
+    const int32_t total_num_bits = id % (BucketWidth * CompRatio); // excluding the [id]-th bit
 
     int32_t num_bits = std::max(
         0, std::min(BucketWidth, total_num_bits - tOffset * BucketWidth));
@@ -274,8 +274,6 @@ __global__ void map_kernel(
       const int32_t offset_idx = id / (BucketWidth * CompRatio);
       out_row[rIdx] = offset[offset_idx] + agg_bitcnt + advance;
     }
-    // printf("tIdx: %lld start %d loc_id: %d num_bits: %d\n", tIdx, start,
-    // loc_id, num_bits);
   }
 }
 
@@ -295,7 +293,7 @@ __global__ void map_uncheck_kernel(
     const IdType id = row[rIdx];
     if (iter[id]) {
       const int32_t bucket_idx = id / BucketWidth;
-      const int32_t total_num_bits = id % (BucketWidth * CompRatio) + 1;
+      const int32_t total_num_bits = id % (BucketWidth * CompRatio); // excluding the [id]-th bit
 
       int32_t num_bits = std::max(
           0, std::min(BucketWidth, total_num_bits - tOffset * BucketWidth));
@@ -367,28 +365,22 @@ DeviceBitmap::DeviceBitmap(int64_t num_elems, DGLContext ctx, int comp_ratio) {
   auto device = runtime::DeviceAPI::Get(_ctx);
   auto stream = runtime::getCurrentCUDAStream();
   CUDA_CALL(cudaStreamCreateWithFlags(&_memset_stream, cudaStreamNonBlocking));
-  //  _memset_stream = stream;
   CUDA_CALL(cudaEventCreate(&_event));
 
-  _bitmap = static_cast<BucketType *>(
-      device->AllocWorkspace(ctx, _num_buckets * sizeof(BucketType)));
-  CUDA_CALL(cudaMemsetAsync(
-      _bitmap, 0, _num_buckets * sizeof(BucketType), _memset_stream));
+  _bitmap = static_cast<BucketType *>(device->AllocWorkspace(_ctx, _num_buckets * sizeof(BucketType)));
+  CUDA_CALL(cudaMemsetAsync(_bitmap, 0, _num_buckets * sizeof(BucketType), _memset_stream));
   CUDA_CALL(cudaEventRecord(_event, _memset_stream));
-  CUDA_CALL(cudaStreamWaitEvent(
-      stream, _event));  // any further cuda call on runtime stream must wait
-                         // until memset is completed
 
-  _offset = static_cast<OffsetType *>(
-      device->AllocWorkspace(ctx, _num_offset * sizeof(OffsetType)));
+  _offset = static_cast<OffsetType *>(device->AllocWorkspace(_ctx, _num_offset * sizeof(OffsetType)));
   _temp_storage_bytes = 1024 * 1024;
-  _d_temp_storage = device->AllocWorkspace(ctx, _temp_storage_bytes);
+  _d_temp_storage = device->AllocWorkspace(_ctx, _temp_storage_bytes);
+  LOG(INFO) << "creating bitmap with num elems: " << num_elems << " on ctx " <<_ctx;
 }
 
 DeviceBitmap::~DeviceBitmap() {
   CUDA_CALL(cudaEventSynchronize(_event));
-  CUDA_CALL(cudaEventDestroy(_event));
-  CUDA_CALL(cudaStreamDestroy(_memset_stream));
+//  CUDA_CALL(cudaEventDestroy(_event));
+//  CUDA_CALL(cudaStreamDestroy(_memset_stream));
 
   auto device = runtime::DeviceAPI::Get(_ctx);
   if (_bitmap) device->FreeWorkspace(_ctx, _bitmap);
@@ -401,19 +393,20 @@ void DeviceBitmap::reset() {
   _offset_built = false;
   auto stream = runtime::getCurrentCUDAStream();
   CUDA_CALL(cudaStreamWaitEvent(
-      _memset_stream, _event));  // must wait until all events have finished
+      stream, _event));  // must wait until all events have finished
+
   CUDA_CALL(cudaMemsetAsync(
       _bitmap, 0, _num_buckets * sizeof(BucketType), _memset_stream));
   CUDA_CALL(cudaEventRecord(_event, _memset_stream));
-  CUDA_CALL(cudaStreamWaitEvent(
-      stream, _event));  // any further cuda call on runtime stream must wait
-                         // until memset is completed
 }
 
 template <typename IdType>
 void DeviceBitmap::flag(const IdType *row, int64_t num_rows) {
   auto stream = runtime::getCurrentCUDAStream();
   auto device = runtime::DeviceAPI::Get(_ctx);
+  CUDA_CALL(cudaStreamWaitEvent(
+      stream, _event));  // any further cuda call on runtime stream must wait until memset is completed
+
   const dim3 block(BlockSize);
   const dim3 grid((num_rows + block.x - 1) / block.x);
   DeviceBitIterator iter(_bitmap, _num_buckets, 0);
@@ -427,6 +420,8 @@ template <typename IdType>
 void DeviceBitmap::unflag(const IdType *row, int64_t num_rows) {
   auto stream = runtime::getCurrentCUDAStream();
   auto device = runtime::DeviceAPI::Get(_ctx);
+  CUDA_CALL(cudaStreamWaitEvent(
+      stream, _event));  // any further cuda call on runtime stream must wait until memset is completed
   const dim3 block(BlockSize);
   const dim3 grid((num_rows + block.x - 1) / block.x);
   DeviceBitIterator iter(_bitmap, _num_buckets, 0);
@@ -442,7 +437,8 @@ void DeviceBitmap::buildOffset() {
   if (_offset_built) return;
   auto device = runtime::DeviceAPI::Get(_ctx);
   auto stream = runtime::getCurrentCUDAStream();
-  //  CUDA_CALL(cudaStreamWaitEvent(stream, _event));
+  CUDA_CALL(cudaStreamWaitEvent(
+      stream, _event));  // any further cuda call on runtime stream must wait until memset is completed
 
   DeviceBitIterator iter(_bitmap, _num_buckets, 0);
 
@@ -484,7 +480,8 @@ int64_t DeviceBitmap::numItem() const {
   auto device = runtime::DeviceAPI::Get(_ctx);
   auto stream = runtime::getCurrentCUDAStream();
   //  CUDA_CALL(cudaStreamWaitEvent(stream, _event));
-
+  CUDA_CALL(cudaStreamWaitEvent(
+      stream, _event));  // any further cuda call on runtime stream must wait until memset is completed
   const dim3 block(BlockSize);
   const dim3 grid((_num_buckets + block.x - 1) / block.x);
   DeviceBitIterator iter(_bitmap, _num_buckets, 0);
@@ -507,7 +504,8 @@ int64_t DeviceBitmap::unique(IdType *out_row) {
   auto device = runtime::DeviceAPI::Get(_ctx);
   auto stream = runtime::getCurrentCUDAStream();
   //  CUDA_CALL(cudaStreamWaitEvent(stream, _event));
-
+  CUDA_CALL(cudaStreamWaitEvent(
+      stream, _event));  // any further cuda call on runtime stream must wait until memset is completed
   NDArray new_len_tensor;
   if (TensorDispatcher::Global()->IsAvailable()) {
     new_len_tensor = NDArray::PinnedEmpty(
@@ -540,16 +538,17 @@ void DeviceBitmap::map(const IdType *row, int64_t num_rows, IdType *out_row) {
   buildOffset();
   auto device = runtime::DeviceAPI::Get(_ctx);
   auto stream = runtime::getCurrentCUDAStream();
-  //  CUDA_CALL(cudaStreamWaitEvent(stream, _event));
-
+  CUDA_CALL(cudaStreamWaitEvent(
+      stream, _event));  // any further cuda call on runtime stream must wait until memset is completed
   const dim3 block(BlockSize);
   const dim3 grid((num_rows * _comp_ratio + block.x - 1) / block.x);
   DeviceBitIterator iter(_bitmap, _num_buckets, 0);
   ATEN_COMP_RATIO_SWITCH(_comp_ratio, COMP_RATIO, {
     CUDA_KERNEL_CALL(
         (impl::map_kernel<IdType, COMP_RATIO>), grid, block, 0, stream, iter,
-        _num_advance, 0, row, num_rows, out_row);
+        _num_advance, _offset, row, num_rows, out_row);
   });
+  CHECK_EQ(_num_advance, 0);
   //  device->StreamSync(_ctx, stream);
   CUDA_CALL(cudaEventRecord(_event, stream));
 };
@@ -559,7 +558,7 @@ void DeviceBitmap::map_uncheck(const IdType *row, int64_t num_rows, IdType *out_
   buildOffset();
   auto device = runtime::DeviceAPI::Get(_ctx);
   auto stream = runtime::getCurrentCUDAStream();
-  //  CUDA_CALL(cudaStreamWaitEvent(stream, _event));
+    CUDA_CALL(cudaStreamWaitEvent(stream, _event));
 
   const dim3 block(BlockSize);
   const dim3 grid((num_rows * _comp_ratio + block.x - 1) / block.x);

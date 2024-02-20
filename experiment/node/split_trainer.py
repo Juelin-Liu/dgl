@@ -72,7 +72,6 @@ def train_split_ddp(rank: int, config: Config, unique_id,
     InitNccl(rank, config.world_size, unique_id)
     step = 0
     step_per_epoch = dataloader.num_step_per_epoch
-    UseBitmap(True)
     print(f"sampling on device: {device}", flush=True)
     timer = Timer()
     epoch_num = config.num_epoch
@@ -100,7 +99,7 @@ def train_split_ddp(rank: int, config: Config, unique_id,
     model.eval()
     ys = []
     y_hats = []
-    dataloader = SplitGraphLoader(graph, partition_map, train_idx, sample_config)
+    dataloader.set_target_idx(valid_idx)
     for input_nodes, output_nodes, blocks in dataloader:
         with torch.no_grad():
 

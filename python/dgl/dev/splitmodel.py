@@ -35,7 +35,7 @@ class Shuffle(torch.autograd.Function):
 # it is applied very generally to HGT as well.
 class SRC_TO_DEST(torch.nn.Module):
     def __init__(self, in_feats, n_hidden, n_classes, layers, \
-                 num_redundant_layers, rank, world_size, model_name):
+                 num_dp, rank, world_size, model_name):
         super().__init__()
         self.in_feats = in_feats
         self.n_hidden = n_hidden
@@ -44,7 +44,7 @@ class SRC_TO_DEST(torch.nn.Module):
         self.layers = nn.ModuleList()
         for l in layers:
             self.layers.append(l)
-        self.num_redundant_layers = num_redundant_layers
+        self.num_dp = num_dp
         self.rank = rank
         self.world_size = world_size
         self.activation = torch.nn.ReLU()
@@ -53,24 +53,11 @@ class SRC_TO_DEST(torch.nn.Module):
 
     def forward(self, blocks, input, inference = False):
         x = input
-        if self.num_redundant_layers == self.n_layers:
-            for i,(block,layer) in enumerate(zip(blocks, self.layers)):
-                x = layer(block, x)
-                if i != len(self.layers) - 1:
-                    x = self.activation(x)
-                if len(x.shape) == 3:
-                    x = x.flatten(-2)
-            return x
-        if not inference:
-            blocks, frontier, unique_id_list = blocks
-        redundant_layer = self.n_layers - self.num_redundant_layers
+        assert(self.num_dp == 0)
         # Todo refactor this code such that redundant_layer != 0 is handled automatically
         for i, (block,layer) in enumerate(zip(blocks, self.layers)):
             if not inference:
-                if i == redundant_layer and redundant_layer != 0:
-                    x = Shuffle.apply(frontier, x, self.rank, self.world_size)
-                if i <  redundant_layer:
-                    x = Shuffle.apply(block.scattered_src, x, self.rank, self.world_size)
+                x = Shuffle.apply(block.scattered_src, x, self.rank, self.world_size)
             if(self.model_name == "hgt"):
                 x = layer(block, x, torch.zeros(x.shape[0],  dtype = torch.int64, device = x.device) \
                           , torch.zeros(block.num_edges(), dtype = torch.int64, device = x.device))
@@ -80,9 +67,6 @@ class SRC_TO_DEST(torch.nn.Module):
                 x = self.activation(x)
             if len(x.shape) == 3:
                 x = x.flatten(-2)
-        if not inference:
-            if len(self.layers) == redundant_layer:
-                x = Shuffle.apply(frontier, x, self.rank, self.world_size)
         return x
 
 # def debug(unique, values, layer_id):
@@ -109,27 +93,14 @@ def get_distributed_model(rank, world_size, num_dp, model_name, feat_size, num_l
     layers = []
     assert(num_layers > 0)
     heads = 4
-    print("n_classes", n_classes)
-    print("model", model_name)
-    # model_type = "debug"
     assert model_name in ["sage", "gat", "hgt", "gcn" ]
     if model_name == "gat":
         # GAT has atleast 2 layers
         assert(num_layers > 1)
-        # allow_zero_in_degree = False
-        # print("allow zero in degree", allow_zero_in_degree)
-        # layers.append(GATConv(feat_size, n_hidden//heads, heads, allow_zero_in_degree=allow_zero_in_degree))
-        # for i in range(num_layers-2):
-        #     layers.append(GATConv(n_hidden, n_hidden//heads, heads, allow_zero_in_degree=allow_zero_in_degree,))
-        # layers.append(GATConv(n_hidden, n_classes, 1, allow_zero_in_degree=allow_zero_in_degree))
         layers.append(GATConv(feat_size, n_hidden//heads, heads))
         for i in range(num_layers-2):
             layers.append(GATConv(n_hidden, n_hidden//heads, heads,))
         layers.append(GATConv(n_hidden, n_classes, 1))
-    # if model_name == "test":
-    #     assert (num_layers > 1)
-    #     for i in range(num_layers):
-    #         layers.append(Gather())
     if model_name == "sage":
         assert (num_layers > 1)
         layers.append(SAGEConv(feat_size, n_hidden , aggregator_type= 'mean'))

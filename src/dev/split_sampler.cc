@@ -46,7 +46,6 @@ DGL_REGISTER_GLOBAL("dev._CAPI_Split_InitNccl")
 
       auto sampler = SplitSampler::Global();
       sampler->initNcclComm(nranks, commId, rank);
-      LOG(INFO) << "Initialed NCCL at rank " << rank << " nranks:" << nranks;
     });
 
 DGL_REGISTER_GLOBAL("dev._CAPI_GetUniqueId")

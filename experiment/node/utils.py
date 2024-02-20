@@ -82,7 +82,7 @@ class Config:
         self.hid_size = hid_size
         self.log_path = log_path
         self.data_dir = data_dir
-        self.num_redundant_layer = len(self.fanouts)
+        self.num_redundant_layer = 0
         self.nvlink = False
         self.in_feat = -1
         self.num_classes = -1

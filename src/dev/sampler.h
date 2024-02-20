@@ -43,51 +43,6 @@ class Sampler {
   bool _use_bitmap{false};
   DGLContext _ctx{}; // inferred from the ctx of the seeds
 
-  // return the unique elements in the arr
-  NDArray getUnique(const std::vector<NDArray> &rows) const {
-    if (_use_bitmap) {
-      CHECK(!rows.empty());
-//      auto ctx = rows.at(0)->ctx;
-      auto dtype = rows.at(0)->dtype;
-      int64_t v_num = _csc.indptr.NumElements() - 1;
-      // LOG(INFO) << "bitmap v_num :" << v_num;
-      DeviceBitmap bitmap(v_num, _ctx);
-      ATEN_ID_TYPE_SWITCH(rows.at(0)->dtype, IdType, {
-        int64_t num_input{0};
-        for (auto const &row : rows) {
-          bitmap.flag(row.Ptr<IdType>(), row.NumElements());
-          num_input += row.NumElements();
-        }
-        NDArray ret = NDArray::Empty({num_input}, dtype, _ctx);
-        int64_t num_unique = bitmap.unique(ret.Ptr<IdType>());
-        return ret.CreateView({num_unique}, dtype);
-      });
-    } else {
-      NDArray arr = aten::Concat(rows);
-      int64_t num_input = arr.NumElements();
-//      auto ctx = arr->ctx;
-      auto stream = runtime::getCurrentCUDAStream();
-      auto device = runtime::DeviceAPI::Get(_ctx);
-      auto *d_num_item =
-          static_cast<int64_t *>(device->AllocWorkspace(_ctx, sizeof(int64_t)));
-
-      int64_t h_num_item = 0;
-      NDArray unique = NDArray::Empty({num_input}, arr->dtype, _ctx);
-      ATEN_ID_TYPE_SWITCH(arr->dtype, IdType, {
-        auto hash_table =
-            runtime::cuda::OrderedHashTable<IdType>(num_input, _ctx, stream);
-        hash_table.FillWithDuplicates(
-            arr.Ptr<IdType>(), num_input, unique.Ptr<IdType>(), d_num_item,
-            stream);
-        CUDA_CALL(cudaMemcpyAsync(
-            &h_num_item, d_num_item, sizeof(int64_t), cudaMemcpyDeviceToHost,
-            stream));
-        device->StreamSync(_ctx, stream);
-      });
-      return unique.CreateView({h_num_item}, arr->dtype);
-    }
-  }
-
  public:
   static std::shared_ptr<Sampler> Global() {
     static auto single_instance = std::make_shared<Sampler>();
@@ -160,38 +115,11 @@ class Sampler {
         int64_t num_input = all_nodes.NumElements();
         auto stream = runtime::getCurrentCUDAStream();
         for (size_t cur_layer = 0; cur_layer < _fanouts.size(); cur_layer++) {
-
-        if (_use_bitmap) {
-          int64_t v_num = _csc.indptr.NumElements() - 1;
-            DeviceBitmap bitmap(v_num, _ctx);
-            auto& block = _batch->_blocks.at(cur_layer);
-            const auto& unique_dst = _batch->_frontiers.at(cur_layer);
-            const auto& unique_src = _batch->_frontiers.at(cur_layer+1);
-            const int64_t num_advance = unique_src.NumElements() - unique_dst.NumElements();
-            CHECK_GE(num_advance, 0);
-            auto device = runtime::DeviceAPI::Get(_ctx);
-            device->StreamSync(_ctx, stream);
-            LOG(INFO) << "layer: " << cur_layer << " unique_dst: " << unique_dst.NumElements() << " unique_src: " << unique_src.NumElements() << " row: " << block.row.NumElements() << " col: " << block.col.NumElements();
-            LOG(INFO) << "org col:" << block.col;
-            LOG(INFO) << "org row: " << block.row;
-            bitmap.flag(unique_dst.Ptr<IdType>(), unique_dst.NumElements());
-            bitmap.map(block.row.Ptr<IdType>(), block.row.NumElements(), block.row.Ptr<IdType>());
-            bitmap.map_uncheck(block.col.Ptr<IdType>(), block.col.NumElements(), block.col.Ptr<IdType>());
-
-            bitmap.flag(unique_src.Ptr<IdType>(), unique_src.NumElements());
-            bitmap.unflag(unique_dst.Ptr<IdType>(), unique_dst.NumElements());
-            bitmap.set_advance(num_advance);
-            bitmap.map_uncheck(block.col.Ptr<IdType>(), block.col.NumElements(), block.col.Ptr<IdType>());
-            device->StreamSync(_ctx, stream);
-            LOG(INFO) << "mapped col:" << block.col;
-            LOG(INFO) << "mapped row: " << block.row;
-        } else {
-          auto hash_table =
-              runtime::cuda::OrderedHashTable<IdType>(num_input, _ctx, stream);
-          hash_table.FillWithUnique(all_nodes.Ptr<IdType>(), num_input, stream);
-            auto& block = _batch->_blocks.at(cur_layer);
-            GPUMapEdges<IdType>(block, hash_table, stream);
-          }
+        auto hash_table =
+            runtime::cuda::OrderedHashTable<IdType>(num_input, _ctx, stream);
+        hash_table.FillWithUnique(all_nodes.Ptr<IdType>(), num_input, stream);
+          auto& block = _batch->_blocks.at(cur_layer);
+          GPUMapEdges<IdType>(block, hash_table, stream);
         }
       });
       batch->reindexed = true;

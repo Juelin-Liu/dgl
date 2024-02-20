@@ -11,6 +11,9 @@
 
 using namespace dgl::runtime::cuda;
 namespace dgl::dev {
+// return the unique elements in the arr
+NDArray getUnique(const std::vector<NDArray> &rows);
+
 template <typename IdType>
 void GPUMapEdges(
     aten::COOMatrix& mat, const runtime::cuda::OrderedHashTable<IdType>& hash,
@@ -18,8 +21,8 @@ void GPUMapEdges(
 
 template <typename IdType>
 void GPUMapEdges(
-    NDArray in_rows, NDArray ret_row,
-    const runtime::cuda::OrderedHashTable<IdType>& hash_table,
+    const NDArray &in_rows, NDArray &ret_row,
+    const runtime::cuda::OrderedHashTable<IdType> &hash_table,
     cudaStream_t stream);
 }  // namespace dgl::dev
 // namespace dgl::dev

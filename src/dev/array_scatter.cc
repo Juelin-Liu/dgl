@@ -174,19 +174,40 @@ void Scatter(
       aten::NullArray(), stream, array->_nccl_comm);
 //  LOG(INFO) << "rank " << rank << " start mapping";
   ATEN_ID_TYPE_SWITCH(array->global_src->dtype, IdType, {
-//    auto bitmap = DeviceBitmap(array->_v_num, ctx);
-    auto bitmap = getBitmap(array->_v_num, ctx);
-    bitmap->flag(
-        array->global_src.Ptr<IdType>(), array->global_src.NumElements());
-    NDArray unique_arr =
-        NDArray::Empty({array->global_src.NumElements()}, dtype, ctx);
-    array->gather_idx_in_unique_out_shuffled =
-        NDArray::Empty({array->global_src.NumElements()}, dtype, ctx);
+    const auto& arr = array->global_src;
+    auto num_input = array->global_src.NumElements();
+    NDArray unique = NDArray::Empty({num_input}, arr->dtype, ctx);
+    array->gather_idx_in_unique_out_shuffled = NDArray::Empty({num_input}, arr->dtype, ctx);
 
-    array->_unique_dim = bitmap->unique(unique_arr.Ptr<IdType>());
-    bitmap->map(array->global_src.Ptr<IdType>(),array->global_src.NumElements(),
-               array->gather_idx_in_unique_out_shuffled.Ptr<IdType>());
-    array->unique_array = unique_arr.CreateView({array->_unique_dim}, dtype);
+    static int64_t *d_num_item{nullptr};
+    if (d_num_item == nullptr) d_num_item = static_cast<int64_t *>(device->AllocWorkspace(ctx, sizeof(int64_t)));
+
+    int64_t h_num_item{0};
+    auto hash_table =
+        runtime::cuda::OrderedHashTable<IdType>(num_input, ctx, stream);
+    hash_table.FillWithDuplicates(
+        arr.Ptr<IdType>(), num_input, unique.Ptr<IdType>(), d_num_item,
+        stream);
+    CUDA_CALL(cudaMemcpyAsync(
+        &h_num_item, d_num_item, sizeof(int64_t), cudaMemcpyDeviceToHost,
+        stream));
+    GPUMapEdges(arr, array->gather_idx_in_unique_out_shuffled, hash_table, stream);
+//    device->StreamSync(ctx, stream); // not necessary since GPUMapEdges will sync the stream
+    array->_unique_dim = h_num_item;
+    array->unique_array = unique.CreateView({array->_unique_dim}, dtype);
+
+//    auto bitmap = getBitmap(array->_v_num, ctx);
+//    bitmap->flag(
+//        array->global_src.Ptr<IdType>(), array->global_src.NumElements());
+//    NDArray unique_arr =
+//        NDArray::Empty({array->global_src.NumElements()}, dtype, ctx);
+//    array->gather_idx_in_unique_out_shuffled =
+//        NDArray::Empty({array->global_src.NumElements()}, dtype, ctx);
+//
+//    array->_unique_dim = bitmap->unique(unique_arr.Ptr<IdType>());
+//    bitmap->map(array->global_src.Ptr<IdType>(),array->global_src.NumElements(),
+//               array->gather_idx_in_unique_out_shuffled.Ptr<IdType>());
+//    array->unique_array = unique_arr.CreateView({array->_unique_dim}, dtype);
   });
 //  LOG(INFO) << "rank " << rank << " done mapping";
 }

@@ -31,18 +31,24 @@ struct SplitBatch {
 
   bool reindexed{false};
   std::vector<aten::COOMatrix> _blocks;
+  std::vector<int64_t > _num_srcs;
+  std::vector<int64_t > _num_dsts;
   std::vector<NDArray> _frontiers;
-  std::vector<NDArray> _upper_index;
   std::vector<ScatteredArray> _scattered_arrays;
   std::vector<HeteroGraphRef> _blockrefs;
   SplitBatch() = default;
   SplitBatch(
-      int64_t batch_id, int64_t num_dp, const std::vector<NDArray>& frontiers,
+      int64_t batch_id, int64_t num_dp,
+      const std::vector<int64_t >& num_srcs,
+      const std::vector<int64_t >& num_dsts,
+      const std::vector<NDArray>& frontiers,
       const std::vector<aten::COOMatrix>& blocks,
       const std::vector<ScatteredArray>& scattered_arrays)
       : _batch_id{batch_id},
         _num_dp{num_dp},
         _blocks{blocks},
+        _num_srcs(num_srcs),
+        _num_dsts(num_dsts),
         _frontiers{frontiers},
         _scattered_arrays{scattered_arrays} {}
 };
@@ -63,51 +69,6 @@ class SplitSampler {
   ncclComm_t _nccl_comm{nullptr};
   bool _use_bitmap{false};
   DGLContext _ctx{};  // inferred from the ctx of the seeds
-
-  // return the unique elements in the arr
-  NDArray getUnique(const std::vector<NDArray>& rows) const {
-    if (_use_bitmap) {
-      CHECK(!rows.empty());
-      //      auto ctx = rows.at(0)->ctx;
-      auto dtype = rows.at(0)->dtype;
-      int64_t v_num = _csc.indptr.NumElements() - 1;
-      //      DeviceBitmap bitmap(v_num, _ctx);
-      auto bitmap = getBitmap(v_num, _ctx);
-      ATEN_ID_TYPE_SWITCH(rows.at(0)->dtype, IdType, {
-        int64_t num_input{0};
-        for (auto const& row : rows) {
-          bitmap->flag(row.Ptr<IdType>(), row.NumElements());
-          num_input += row.NumElements();
-        }
-        NDArray ret = NDArray::Empty({num_input}, dtype, _ctx);
-        int64_t num_unique = bitmap->unique(ret.Ptr<IdType>());
-        return ret.CreateView({num_unique}, dtype);
-      });
-    } else {
-      NDArray arr = aten::Concat(rows);
-      int64_t num_input = arr.NumElements();
-      //      auto ctx = arr->ctx;
-      auto stream = runtime::getCurrentCUDAStream();
-      auto device = runtime::DeviceAPI::Get(_ctx);
-      auto* d_num_item =
-          static_cast<int64_t*>(device->AllocWorkspace(_ctx, sizeof(int64_t)));
-
-      int64_t h_num_item = 0;
-      NDArray unique = NDArray::Empty({num_input}, arr->dtype, _ctx);
-      ATEN_ID_TYPE_SWITCH(arr->dtype, IdType, {
-        auto hash_table =
-            runtime::cuda::OrderedHashTable<IdType>(num_input, _ctx, stream);
-        hash_table.FillWithDuplicates(
-            arr.Ptr<IdType>(), num_input, unique.Ptr<IdType>(), d_num_item,
-            stream);
-        CUDA_CALL(cudaMemcpyAsync(
-            &h_num_item, d_num_item, sizeof(int64_t), cudaMemcpyDeviceToHost,
-            stream));
-        device->StreamSync(_ctx, stream);
-      });
-      return unique.CreateView({h_num_item}, arr->dtype);
-    }
-  }
 
  public:
   ~SplitSampler() {
@@ -178,6 +139,9 @@ class SplitSampler {
     _ctx = seeds->ctx;
     std::vector<aten::COOMatrix> blocks;
     std::vector<NDArray> frontiers = {seeds};
+    std::vector<int64_t > num_srcs;
+    std::vector<int64_t > num_dsts;
+
     std::vector<ScatteredArray> scattered_arrays;
     for (size_t layer = 0; layer < _fanouts.size(); layer++) {
       int64_t fanout = _fanouts.at(layer);
@@ -185,12 +149,14 @@ class SplitSampler {
       // assume seeds are all local nodes
       aten::COOMatrix block = aten::CSRRowWiseSampling(
           _csc, frontier, fanout, aten::NullArray(), replace);
-      blocks.push_back(block);
+
+      auto unique_src = getUnique({frontier, block.col});
+      num_srcs.push_back(unique_src.NumElements());
+      num_dsts.push_back(frontier.NumElements());
 
       if (layer < _num_dp) {
-        frontiers.push_back(getUnique({frontier, block.col}));
+        frontiers.push_back(unique_src);
       } else {
-        auto unique_src = getUnique({frontier, block.col});
         auto partition_idx = IndexSelect(
             _partition_map, unique_src, runtime::getCurrentCUDAStream());
         auto scatter_arr =
@@ -201,14 +167,15 @@ class SplitSampler {
         Scatter(
             _rank, _world_size, _num_partitions, unique_src, partition_idx,
             scatter_arr);
-        frontiers.push_back(scatter_arr->unique_array.CreateView(
-            {scatter_arr->_unique_dim}, scatter_arr->unique_array->dtype));
+        frontiers.push_back(scatter_arr->unique_array);
         scattered_arrays.push_back(scatter_arr);
       }
+      blocks.push_back(block);
     }
+
     int64_t batch_id = _next_id++;
     _batch = std::make_shared<SplitBatch>(
-        batch_id, _num_dp, frontiers, blocks, scattered_arrays);
+        batch_id, _num_dp, num_srcs, num_dsts, frontiers, blocks, scattered_arrays);
     return batch_id;
   }
 
@@ -220,33 +187,27 @@ class SplitSampler {
         << "getBlock batch id " << batch_id << " is not found in the pool";
     CHECK(batch->_blocks.size() == _fanouts.size());
     if (should_reindex && !batch->reindexed) {
-      auto all_nodes = batch->_frontiers.at(_fanouts.size());
-      ATEN_ID_TYPE_SWITCH(all_nodes->dtype, IdType, {
-        int64_t num_input = all_nodes.NumElements();
+      auto dtype = batch->_frontiers.at(_fanouts.size())->dtype;
+      ATEN_ID_TYPE_SWITCH(dtype, IdType, {
         auto stream = runtime::getCurrentCUDAStream();
-        if (_use_bitmap) {
-          int64_t v_num = _csc.indptr.NumElements() - 1;
-          //          DeviceBitmap bitmap(v_num, _ctx);
-          auto bitmap = getBitmap(_v_num, _ctx);
-          bitmap->flag(all_nodes.Ptr<IdType>(), all_nodes.NumElements());
-          bitmap->buildOffset();
-          assert(bitmap->numItem() == num_input);
-          for (auto& block : batch->_blocks) {
-            bitmap->map(
-                block.col.Ptr<IdType>(), block.col.NumElements(),
-                block.col.Ptr<IdType>());
-            bitmap->map(
-                block.row.Ptr<IdType>(), block.row.NumElements(),
-                block.row.Ptr<IdType>());
-          }
-        } else {
-          auto hash_table =
-              runtime::cuda::OrderedHashTable<IdType>(num_input, _ctx, stream);
-          hash_table.FillWithUnique(all_nodes.Ptr<IdType>(), num_input, stream);
-          for (auto& block : batch->_blocks) {
+        auto device = runtime::DeviceAPI::Get(_ctx);
+
+          // we unfortunately need to consider all cols since we removed remote cols in frontiers
+        static int64_t *d_num_item{nullptr};
+        if (d_num_item == nullptr) d_num_item = static_cast<int64_t *>(device->AllocWorkspace(_ctx, sizeof(int64_t)));
+
+          for (size_t cur_layer = 0; cur_layer < _fanouts.size(); cur_layer++) {
+
+            auto &block = _batch->_blocks.at(cur_layer);
+            const auto &unique_dst = _batch->_frontiers.at(cur_layer);
+            auto all_nodes = aten::Concat({unique_dst, block.col});
+            auto num_input = all_nodes.NumElements();
+            auto hash_table =
+                runtime::cuda::OrderedHashTable<IdType>(num_input, _ctx, stream);
+            NDArray unique = NDArray::Empty({num_input}, all_nodes->dtype, _ctx);
+            hash_table.FillWithDuplicates(all_nodes.Ptr<IdType>(), num_input, unique.Ptr<IdType>(), d_num_item, stream);
             GPUMapEdges<IdType>(block, hash_table, stream);
           }
-        }
       });
       batch->reindexed = true;
     }
@@ -255,8 +216,8 @@ class SplitSampler {
       // create graph ref
       for (size_t i = 0; i < _fanouts.size(); i++) {
         auto& mat = batch->_blocks.at(i);
-        int64_t num_src = batch->_frontiers.at(i + 1).NumElements();
-        int64_t num_dst = batch->_frontiers.at(i).NumElements();
+        int64_t num_src = batch->_num_srcs.at(i );
+        int64_t num_dst = batch->_num_dsts.at(i);
         auto graph = HeteroGraphRef(CreateFromCOO(
             2, num_src, num_dst, mat.col, mat.row, false, false, COO_CODE));
         batch->_blockrefs.push_back(graph);

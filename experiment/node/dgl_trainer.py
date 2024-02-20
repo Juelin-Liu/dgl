@@ -17,8 +17,11 @@ def bench_dgl_batch(configs: list[Config]):
     graph, feat, label, train_idx, valid_idx, test_idx, num_label = load_data(configs[0], is_pinned=True)
     for config in configs:
         config.num_classes = num_label
+        if config.world_size == 1:
+            train_dgl(0, config, graph, feat, label, num_label, train_idx, test_idx)
+            continue
         try:
-            spawn(train_dgl_ddp, args=(config, graph, feat, label, num_label, train_idx, test_idx), nprocs=config.world_size)
+            spawn(train_dgl, args=(config, graph, feat, label, num_label, train_idx, test_idx), nprocs=config.world_size)
         except Exception as e:
             print(f"error encountered with {config=}:", e)
             if "out of memory"in str(e):
@@ -30,7 +33,7 @@ def bench_dgl_batch(configs: list[Config]):
         gc.collect()
         torch.cuda.empty_cache()
             
-def train_dgl_ddp(rank: int, config: Config, graph: dgl.DGLGraph, feat: torch.Tensor, label: torch.Tensor, num_label: int, train_idx: torch.Tensor, test_idx: torch.Tensor):
+def train_dgl(rank: int, config: Config, graph: dgl.DGLGraph, feat: torch.Tensor, label: torch.Tensor, num_label: int, train_idx: torch.Tensor, test_idx: torch.Tensor):
     ddp_setup(rank, config.world_size)
     device = torch.cuda.current_device()
     e2eTimer = Timer()
@@ -50,7 +53,8 @@ def train_dgl_ddp(rank: int, config: Config, graph: dgl.DGLGraph, feat: torch.Te
     elif config.model == "sage":
         model = Sage(in_feats=feat.shape[1], hid_feats=config.hid_size, num_layers=len(config.fanouts), out_feats=num_label)
     model = model.to(device)
-    model = DDP(model, device_ids=[rank])
+    if (config.world_size > 1):
+        model = DDP(model, device_ids=[rank])
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     
     print(f"preheating trainer on device: {device}")
@@ -131,7 +135,7 @@ def train_dgl_ddp(rank: int, config: Config, graph: dgl.DGLGraph, feat: torch.Te
         model.eval()
         ys = []
         y_hats = []
-        dataloader = GraphDataloader(graph, test_idx, sample_config)
+        dataloader.set_target_idx(test_idx)
         for input_nodes, output_nodes, blocks in dataloader:
             with torch.no_grad():
 

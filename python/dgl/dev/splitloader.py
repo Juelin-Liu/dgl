@@ -23,17 +23,8 @@ class SplitGraphLoader:
         self.fanouts = config.fanouts
         self.replace = config.replace
         self.reindex = config.reindex
-        self.global_target_idx = target_idx
-        self.target_idx = target_idx[partition_map[target_idx] == self.rank].to(self.rank)
-        self.num_step_per_epoch = self.global_target_idx.shape[0] // config.batch_size
-        self.batch_size = self.target_idx.shape[0] // self.num_step_per_epoch
-        self.partition_map = partition_map.to(self.rank)
-        self.idx_loader = IdxLoader(target_idx=self.target_idx,
-                                    batch_size=self.batch_size,
-                                    max_step_per_epoch=self.num_step_per_epoch,
-                                    shuffle=True)
-        self.iter = iter(self.idx_loader)
         self.config = config
+        self.partition_map = partition_map.to(self.rank)
 
         if config.mode == "uva":
             self.g = g.pin_memory_()
@@ -45,11 +36,24 @@ class SplitGraphLoader:
         SetFanout(config.fanouts)
         SetPartitionMap(config.num_partition, self.partition_map)
         SetRank(config.rank, config.world_size)
-
+        self.set_target_idx(target_idx)
+        
     def set_fanout(self, fanouts):
         self.fanouts = fanouts
         SetFanout(fanouts)
-
+        
+    def set_target_idx(self, target_idx):
+        target_idx = target_idx.to(self.rank)
+        self.global_target_idx = target_idx
+        self.target_idx = target_idx[self.partition_map[target_idx] == self.rank].to(self.rank)
+        self.num_step_per_epoch = self.global_target_idx.shape[0] // self.config.batch_size
+        self.batch_size = self.target_idx.shape[0] // self.num_step_per_epoch
+        self.idx_loader = IdxLoader(target_idx=self.target_idx,
+                                    batch_size=self.batch_size,
+                                    max_step_per_epoch=self.num_step_per_epoch,
+                                    shuffle=True)
+        self.iter = iter(self.idx_loader)
+        
     def reset(self):
         self.idx_loader = IdxLoader(self.target_idx, batch_size=self.batch_size)
         self.iter = iter(self.idx_loader)

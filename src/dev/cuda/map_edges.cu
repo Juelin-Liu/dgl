@@ -119,7 +119,7 @@ void GPUMapEdges(
 
 template <typename IdType>
 void GPUMapEdges(
-    NDArray in_rows, NDArray ret_row,
+    const NDArray& in_rows, NDArray& ret_row,
     const runtime::cuda::OrderedHashTable<IdType>& hash_table,
     cudaStream_t stream) {
   CHECK_GE(ret_row.NumElements(), in_rows.NumElements());
@@ -142,9 +142,37 @@ template void GPUMapEdges<int64_t>(
     aten::COOMatrix&, const OrderedHashTable<int64_t>&, cudaStream_t);
 
 template void GPUMapEdges<int32_t>(
-    NDArray, NDArray, const OrderedHashTable<int32_t>& hash_table,
-    cudaStream_t);
+    const NDArray& , NDArray& ,
+    const OrderedHashTable<int32_t>& ,
+    cudaStream_t );
+
 template void GPUMapEdges<int64_t>(
-    NDArray, NDArray, const OrderedHashTable<int64_t>& hash_table,
-    cudaStream_t);
+    const NDArray& , NDArray& ,
+    const OrderedHashTable<int64_t>& ,
+    cudaStream_t );
+
+NDArray getUnique(const std::vector<NDArray> &rows) {
+  NDArray arr = aten::Concat(rows);
+  int64_t num_input = arr.NumElements();
+  auto ctx = arr->ctx;
+  auto stream = runtime::getCurrentCUDAStream();
+  auto device = runtime::DeviceAPI::Get(ctx);
+  static int64_t *d_num_item{nullptr};
+  if (d_num_item == nullptr) d_num_item = static_cast<int64_t *>(device->AllocWorkspace(ctx, sizeof(int64_t)));
+
+  int64_t h_num_item = 0;
+  NDArray unique = NDArray::Empty({num_input}, arr->dtype, ctx);
+  ATEN_ID_TYPE_SWITCH(arr->dtype, IdType, {
+    auto hash_table =
+        runtime::cuda::OrderedHashTable<IdType>(num_input, ctx, stream);
+    hash_table.FillWithDuplicates(
+        arr.Ptr<IdType>(), num_input, unique.Ptr<IdType>(), d_num_item,
+        stream);
+    CUDA_CALL(cudaMemcpyAsync(
+        &h_num_item, d_num_item, sizeof(int64_t), cudaMemcpyDeviceToHost,
+        stream));
+    device->StreamSync(ctx, stream);
+  });
+  return unique.CreateView({h_num_item}, arr->dtype);
+}
 }  // namespace dgl::dev
