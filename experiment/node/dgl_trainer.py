@@ -6,7 +6,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.multiprocessing import spawn
 from node.model import *
 from node.utils import *
-from dgl.dev import *
+from dgl.dev.dataloader import *
 
 def bench_dgl_batch(configs: list[Config]):
     for config in configs:
@@ -43,7 +43,7 @@ def train_dgl_ddp(rank: int, config: Config, graph: dgl.DGLGraph, feat: torch.Te
     sample_config = SampleConfig(rank=rank, batch_size=config.batch_size, world_size=config.world_size, mode=mode, fanouts=config.fanouts)
     dataloader = GraphDataloader(graph, train_idx, sample_config)
     config.in_feat = feat.shape[1]
-
+    UseBitmap(True)
     model = None
     if config.model == "gat":
         model = Gat(in_feats=feat.shape[1], hid_feats=config.hid_size, num_layers=len(config.fanouts), out_feats=num_label, num_heads=4)

@@ -21,10 +21,12 @@ class GraphDataloader:
         self.global_target_idx = target_idx
         self.target_idx = target_idx[config.rank * self.loc_idx_size:(config.rank + 1) * self.loc_idx_size].clone().to(
             self.device)
+        self.shuffle = True
+        self.max_step_per_epoch = self.target_idx.shape[0] // self.batch_size
         self.idx_loader = IdxLoader(target_idx=self.target_idx,
                                      batch_size=self.batch_size,
-                                     max_step_per_epoch=self.target_idx.shape[0] // self.batch_size,
-                                     shuffle=True)
+                                     shuffle=True,
+                                     max_step_per_epoch=self.max_step_per_epoch)
 
         self.iter = iter(self.idx_loader)
         self.config = config
@@ -43,7 +45,10 @@ class GraphDataloader:
         SetFanout(fanouts)
 
     def reset(self):
-        self.idx_loader = IdxLoader(self.target_idx, batch_size=self.batch_size)
+        self.idx_loader = IdxLoader(target_idx=self.target_idx, 
+                                    batch_size=self.batch_size, 
+                                    shuffle=True, 
+                                    max_step_per_epoch=self.max_step_per_epoch)
         self.iter = iter(self.idx_loader)
 
     def __iter__(self):

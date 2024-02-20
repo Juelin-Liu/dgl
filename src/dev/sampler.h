@@ -50,6 +50,7 @@ class Sampler {
 //      auto ctx = rows.at(0)->ctx;
       auto dtype = rows.at(0)->dtype;
       int64_t v_num = _csc.indptr.NumElements() - 1;
+      // LOG(INFO) << "bitmap v_num :" << v_num;
       DeviceBitmap bitmap(v_num, _ctx);
       ATEN_ID_TYPE_SWITCH(rows.at(0)->dtype, IdType, {
         int64_t num_input{0};
@@ -157,31 +158,44 @@ class Sampler {
       auto all_nodes = batch->_frontiers.at(_fanouts.size());
       ATEN_ID_TYPE_SWITCH(all_nodes->dtype, IdType, {
         int64_t num_input = all_nodes.NumElements();
-//        auto ctx = all_nodes->ctx;
-
         auto stream = runtime::getCurrentCUDAStream();
+        for (size_t cur_layer = 0; cur_layer < _fanouts.size(); cur_layer++) {
+
         if (_use_bitmap) {
           int64_t v_num = _csc.indptr.NumElements() - 1;
-          DeviceBitmap bitmap(v_num, _ctx);
-          bitmap.flag(all_nodes.Ptr<IdType>(), all_nodes.NumElements());
-          bitmap.buildOffset();
-          assert(bitmap.numItem() == num_input);
-          for (auto &block: batch->_blocks) {
-            bitmap.map(block.col.Ptr<IdType>(), block.col.NumElements(), block.col.Ptr<IdType>());
+            DeviceBitmap bitmap(v_num, _ctx);
+            auto& block = _batch->_blocks.at(cur_layer);
+            const auto& unique_dst = _batch->_frontiers.at(cur_layer);
+            const auto& unique_src = _batch->_frontiers.at(cur_layer+1);
+            const int64_t num_advance = unique_src.NumElements() - unique_dst.NumElements();
+            CHECK_GE(num_advance, 0);
+            auto device = runtime::DeviceAPI::Get(_ctx);
+            device->StreamSync(_ctx, stream);
+            LOG(INFO) << "layer: " << cur_layer << " unique_dst: " << unique_dst.NumElements() << " unique_src: " << unique_src.NumElements() << " row: " << block.row.NumElements() << " col: " << block.col.NumElements();
+            LOG(INFO) << "org col:" << block.col;
+            LOG(INFO) << "org row: " << block.row;
+            bitmap.flag(unique_dst.Ptr<IdType>(), unique_dst.NumElements());
             bitmap.map(block.row.Ptr<IdType>(), block.row.NumElements(), block.row.Ptr<IdType>());
-          }
+            bitmap.map_uncheck(block.col.Ptr<IdType>(), block.col.NumElements(), block.col.Ptr<IdType>());
+
+            bitmap.flag(unique_src.Ptr<IdType>(), unique_src.NumElements());
+            bitmap.unflag(unique_dst.Ptr<IdType>(), unique_dst.NumElements());
+            bitmap.set_advance(num_advance);
+            bitmap.map_uncheck(block.col.Ptr<IdType>(), block.col.NumElements(), block.col.Ptr<IdType>());
+            device->StreamSync(_ctx, stream);
+            LOG(INFO) << "mapped col:" << block.col;
+            LOG(INFO) << "mapped row: " << block.row;
         } else {
           auto hash_table =
               runtime::cuda::OrderedHashTable<IdType>(num_input, _ctx, stream);
           hash_table.FillWithUnique(all_nodes.Ptr<IdType>(), num_input, stream);
-          for (auto &block : batch->_blocks) {
+            auto& block = _batch->_blocks.at(cur_layer);
             GPUMapEdges<IdType>(block, hash_table, stream);
           }
         }
       });
       batch->reindexed = true;
     }
-
     if (batch->_blockrefs.size() != batch->_blocks.size()) {
       // create graph ref
       for (size_t i = 0; i < _fanouts.size(); i++) {

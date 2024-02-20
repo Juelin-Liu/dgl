@@ -9,6 +9,15 @@
 namespace dgl::dev {
 using namespace runtime;
 
+DGL_REGISTER_GLOBAL("dev._CAPI_GetBlockScatteredSrc")
+    .set_body([](DGLArgs args, DGLRetValue *rv) {
+      int64_t batch_id = args[0];
+      int64_t layer = args[1];
+      ScatteredArray scatter_array = SplitSampler::Global()->getScatteredArray(batch_id, layer);
+      *rv = scatter_array;
+    });
+
+
 DGL_REGISTER_GLOBAL("dev._CAPI_Split_ScatterForward")
     .set_body([](DGLArgs args, DGLRetValue *rv) {
       ScatteredArray scatter_array = args[0];

@@ -8,20 +8,20 @@
 #include <dgl/aten/array_ops.h>
 #include <dgl/runtime/c_runtime_api.h>
 #include <dgl/runtime/container.h>
+#include <nccl.h>
 
 #include <memory>
 #include <queue>
 #include <utility>
-#include <nccl.h>
 
 #include "../graph/unit_graph.h"
 #include "../runtime/cuda/cuda_common.h"
 #include "../runtime/cuda/cuda_hashtable.cuh"
 #include "array_scatter.h"
+#include "cuda/all2all.h"
 #include "cuda/bitmap.h"
 #include "cuda/index_select.cuh"
 #include "cuda/map_edges.cuh"
-#include "cuda/all2all.h"
 
 namespace dgl::dev {
 
@@ -71,7 +71,7 @@ class SplitSampler {
       //      auto ctx = rows.at(0)->ctx;
       auto dtype = rows.at(0)->dtype;
       int64_t v_num = _csc.indptr.NumElements() - 1;
-//      DeviceBitmap bitmap(v_num, _ctx);
+      //      DeviceBitmap bitmap(v_num, _ctx);
       auto bitmap = getBitmap(v_num, _ctx);
       ATEN_ID_TYPE_SWITCH(rows.at(0)->dtype, IdType, {
         int64_t num_input{0};
@@ -119,7 +119,7 @@ class SplitSampler {
     return single_instance;
   }
 
-  void initNcclComm(int64_t nranks, ncclUniqueId commId, int64_t rank){
+  void initNcclComm(int64_t nranks, ncclUniqueId commId, int64_t rank) {
     auto res = ncclCommInitRank(&_nccl_comm, nranks, commId, rank);
     CHECK_EQ(res, ncclSuccess);
   }
@@ -191,7 +191,8 @@ class SplitSampler {
         frontiers.push_back(getUnique({frontier, block.col}));
       } else {
         auto unique_src = getUnique({frontier, block.col});
-        auto partition_idx = IndexSelect(_partition_map, unique_src, runtime::getCurrentCUDAStream());
+        auto partition_idx = IndexSelect(
+            _partition_map, unique_src, runtime::getCurrentCUDAStream());
         auto scatter_arr =
             ScatteredArray::Create(_v_num, _ctx, unique_src->dtype, _nccl_comm);
         // send remote frontiers to remote gpus
@@ -225,7 +226,7 @@ class SplitSampler {
         auto stream = runtime::getCurrentCUDAStream();
         if (_use_bitmap) {
           int64_t v_num = _csc.indptr.NumElements() - 1;
-//          DeviceBitmap bitmap(v_num, _ctx);
+          //          DeviceBitmap bitmap(v_num, _ctx);
           auto bitmap = getBitmap(_v_num, _ctx);
           bitmap->flag(all_nodes.Ptr<IdType>(), all_nodes.NumElements());
           bitmap->buildOffset();
@@ -281,6 +282,11 @@ class SplitSampler {
     std::shared_ptr<SplitBatch> batch{_batch};
     CHECK_EQ(batch->_batch_id, batch_id);
     return batch->_blocks.at(layer).data;
+  }
+
+  ScatteredArray getScatteredArray(int64_t batch_id, int64_t layer) {
+    CHECK_EQ(_batch->_batch_id, batch_id);
+    return _batch->_scattered_arrays.at(layer - _num_dp);
   }
 };
 

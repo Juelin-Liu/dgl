@@ -146,6 +146,17 @@ class DeviceBitIterator
   }
 
   template <typename Distance>
+  __device__ __forceinline__ void unflag(Distance n) {
+    assert(n < _num_buckets * BucketWidth);
+    const int64_t bucket_idx = (_offset + n) / BucketWidth;
+    const BucketType shift = (_offset + n) % BucketWidth;
+    const BucketType mask = BucketHighestBit >> shift;
+    atomicXor(_bitmap + bucket_idx, mask);
+    // printf("flag n %ld shift %d mask %d offset %ld bitmap %d\n", n, shift,
+    // mask, _offset, _bitmap[bucket_idx]);
+  }
+
+  template <typename Distance>
   __device__ __forceinline__ BucketType popcnt(Distance bucket_idx) const {
     return __popc(_bitmap[bucket_idx]);
   }
@@ -182,6 +193,15 @@ __global__ void flag_kernel(
   const int64_t tIdx = threadIdx.x + blockIdx.x * blockDim.x;
   if (tIdx < num_rows) {
     iter.flag(row[tIdx]);
+  }
+}
+
+template <typename IdType>
+__global__ void unflag_kernel(
+    DeviceBitIterator iter, const IdType *row, int64_t num_rows) {
+  const int64_t tIdx = threadIdx.x + blockIdx.x * blockDim.x;
+  if (tIdx < num_rows) {
+    iter.unflag(row[tIdx]);
   }
 }
 
@@ -227,8 +247,8 @@ __global__ void cnt_kernel(
 
 template <typename IdType, int CompRatio>
 __global__ void map_kernel(
-    DeviceBitIterator iter, const OffsetType *offset, const IdType *row,
-    int64_t num_rows, IdType *out_row) {
+    DeviceBitIterator iter, const uint32_t advance, const OffsetType *offset,
+    const IdType *row, int64_t num_rows, IdType *out_row) {
   assert(blockDim.x == BlockSize && CompRatio <= 32);
   const int64_t tIdx = threadIdx.x + blockIdx.x * blockDim.x;
   const int32_t rIdx = tIdx / CompRatio;
@@ -252,10 +272,45 @@ __global__ void map_kernel(
     const int agg_bitcnt = WarpReduce(temp_storage[group_id]).Sum(bitcnt);
     if (tOffset == 0) {
       const int32_t offset_idx = id / (BucketWidth * CompRatio);
-      out_row[rIdx] = offset[offset_idx] + agg_bitcnt;
+      out_row[rIdx] = offset[offset_idx] + agg_bitcnt + advance;
     }
     // printf("tIdx: %lld start %d loc_id: %d num_bits: %d\n", tIdx, start,
     // loc_id, num_bits);
+  }
+}
+
+template <typename IdType, int CompRatio>
+__global__ void map_uncheck_kernel(
+    DeviceBitIterator iter, const uint32_t advance, const OffsetType *offset,
+    const IdType *row, int64_t num_rows, IdType *out_row) {
+  assert(blockDim.x == BlockSize && CompRatio <= 32);
+  const int64_t tIdx = threadIdx.x + blockIdx.x * blockDim.x;
+  const int32_t rIdx = tIdx / CompRatio;
+  const int32_t tOffset = tIdx % CompRatio;
+  typedef cub::WarpReduce<int, CompRatio> WarpReduce;
+  __shared__
+      typename WarpReduce::TempStorage temp_storage[BlockSize / CompRatio];
+
+  if (rIdx < num_rows) {
+    const IdType id = row[rIdx];
+    if (iter[id]) {
+      const int32_t bucket_idx = id / BucketWidth;
+      const int32_t total_num_bits = id % (BucketWidth * CompRatio) + 1;
+
+      int32_t num_bits = std::max(
+          0, std::min(BucketWidth, total_num_bits - tOffset * BucketWidth));
+      ;
+
+      const int bitcnt = iter.popcnt(bucket_idx + tOffset, num_bits);
+      const int group_id = threadIdx.x / CompRatio;
+      const int agg_bitcnt = WarpReduce(temp_storage[group_id]).Sum(bitcnt);
+      if (tOffset == 0) {
+        const int32_t offset_idx = id / (BucketWidth * CompRatio);
+        out_row[rIdx] = offset[offset_idx] + agg_bitcnt + advance;
+      }
+      // printf("tIdx: %lld start %d loc_id: %d num_bits: %d\n", tIdx, start,
+      // loc_id, num_bits);
+    }
   }
 }
 
@@ -303,7 +358,8 @@ __global__ void unique_kernel(
 
 DeviceBitmap::DeviceBitmap(int64_t num_elems, DGLContext ctx, int comp_ratio) {
   _comp_ratio = comp_ratio;
-  _num_buckets = (num_elems + BucketWidth - 1) / BucketWidth;  // 32 bits per buckets
+  _num_buckets =
+      (num_elems + BucketWidth - 1) / BucketWidth;  // 32 bits per buckets
   _num_buckets = _num_buckets + _comp_ratio -
                  _num_buckets % _comp_ratio;  // make it multiple on _comp_ratio
   _num_offset = (_num_buckets + _comp_ratio - 1) / _comp_ratio + 1;
@@ -311,14 +367,17 @@ DeviceBitmap::DeviceBitmap(int64_t num_elems, DGLContext ctx, int comp_ratio) {
   auto device = runtime::DeviceAPI::Get(_ctx);
   auto stream = runtime::getCurrentCUDAStream();
   CUDA_CALL(cudaStreamCreateWithFlags(&_memset_stream, cudaStreamNonBlocking));
-//  _memset_stream = stream;
+  //  _memset_stream = stream;
   CUDA_CALL(cudaEventCreate(&_event));
 
   _bitmap = static_cast<BucketType *>(
       device->AllocWorkspace(ctx, _num_buckets * sizeof(BucketType)));
-  CUDA_CALL(cudaMemsetAsync(_bitmap, 0, _num_buckets * sizeof(BucketType), _memset_stream));
+  CUDA_CALL(cudaMemsetAsync(
+      _bitmap, 0, _num_buckets * sizeof(BucketType), _memset_stream));
   CUDA_CALL(cudaEventRecord(_event, _memset_stream));
-  CUDA_CALL(cudaStreamWaitEvent(stream, _event)); // any further cuda call on runtime stream must wait until memset is completed
+  CUDA_CALL(cudaStreamWaitEvent(
+      stream, _event));  // any further cuda call on runtime stream must wait
+                         // until memset is completed
 
   _offset = static_cast<OffsetType *>(
       device->AllocWorkspace(ctx, _num_offset * sizeof(OffsetType)));
@@ -327,23 +386,28 @@ DeviceBitmap::DeviceBitmap(int64_t num_elems, DGLContext ctx, int comp_ratio) {
 }
 
 DeviceBitmap::~DeviceBitmap() {
+  CUDA_CALL(cudaEventSynchronize(_event));
+  CUDA_CALL(cudaEventDestroy(_event));
+  CUDA_CALL(cudaStreamDestroy(_memset_stream));
+
   auto device = runtime::DeviceAPI::Get(_ctx);
   if (_bitmap) device->FreeWorkspace(_ctx, _bitmap);
   if (_offset) device->FreeWorkspace(_ctx, _offset);
   if (_d_temp_storage) device->FreeWorkspace(_ctx, _d_temp_storage);
-  CUDA_CALL(cudaEventSynchronize(_event));
-  CUDA_CALL(cudaEventDestroy(_event));
-  CUDA_CALL(cudaStreamDestroy(_memset_stream));
 }
 
 void DeviceBitmap::reset() {
-//  auto device = runtime::DeviceAPI::Get(_ctx);
+  //  auto device = runtime::DeviceAPI::Get(_ctx);
   _offset_built = false;
   auto stream = runtime::getCurrentCUDAStream();
-  CUDA_CALL(cudaStreamWaitEvent(_memset_stream, _event)); // must wait until all events have finished
-  CUDA_CALL(cudaMemsetAsync(_bitmap, 0, _num_buckets * sizeof(BucketType), _memset_stream));
+  CUDA_CALL(cudaStreamWaitEvent(
+      _memset_stream, _event));  // must wait until all events have finished
+  CUDA_CALL(cudaMemsetAsync(
+      _bitmap, 0, _num_buckets * sizeof(BucketType), _memset_stream));
   CUDA_CALL(cudaEventRecord(_event, _memset_stream));
-  CUDA_CALL(cudaStreamWaitEvent(stream, _event)); // any further cuda call on runtime stream must wait until memset is completed
+  CUDA_CALL(cudaStreamWaitEvent(
+      stream, _event));  // any further cuda call on runtime stream must wait
+                         // until memset is completed
 }
 
 template <typename IdType>
@@ -359,13 +423,26 @@ void DeviceBitmap::flag(const IdType *row, int64_t num_rows) {
   CUDA_CALL(cudaEventRecord(_event, stream));
 }
 
+template <typename IdType>
+void DeviceBitmap::unflag(const IdType *row, int64_t num_rows) {
+  auto stream = runtime::getCurrentCUDAStream();
+  auto device = runtime::DeviceAPI::Get(_ctx);
+  const dim3 block(BlockSize);
+  const dim3 grid((num_rows + block.x - 1) / block.x);
+  DeviceBitIterator iter(_bitmap, _num_buckets, 0);
+  CUDA_KERNEL_CALL(
+      impl::unflag_kernel, grid, block, 0, stream, iter, row, num_rows);
+  _offset_built = false;
+  CUDA_CALL(cudaEventRecord(_event, stream));
+}
+
 void DeviceBitmap::sync() { CUDA_CALL(cudaEventSynchronize(_event)); }
 
 void DeviceBitmap::buildOffset() {
   if (_offset_built) return;
   auto device = runtime::DeviceAPI::Get(_ctx);
   auto stream = runtime::getCurrentCUDAStream();
-//  CUDA_CALL(cudaStreamWaitEvent(stream, _event));
+  //  CUDA_CALL(cudaStreamWaitEvent(stream, _event));
 
   DeviceBitIterator iter(_bitmap, _num_buckets, 0);
 
@@ -406,7 +483,7 @@ void DeviceBitmap::buildOffset() {
 int64_t DeviceBitmap::numItem() const {
   auto device = runtime::DeviceAPI::Get(_ctx);
   auto stream = runtime::getCurrentCUDAStream();
-//  CUDA_CALL(cudaStreamWaitEvent(stream, _event));
+  //  CUDA_CALL(cudaStreamWaitEvent(stream, _event));
 
   const dim3 block(BlockSize);
   const dim3 grid((_num_buckets + block.x - 1) / block.x);
@@ -420,7 +497,7 @@ int64_t DeviceBitmap::numItem() const {
   CUDA_CALL(cudaMemcpyAsync(
       &h_num_item, d_num_item, sizeof(uint32_t), cudaMemcpyDeviceToHost,
       stream))
-  device->StreamSync(_ctx, stream); // don't need to record event
+  device->StreamSync(_ctx, stream);  // don't need to record event
   return h_num_item;
 }
 
@@ -429,7 +506,7 @@ int64_t DeviceBitmap::unique(IdType *out_row) {
   buildOffset();
   auto device = runtime::DeviceAPI::Get(_ctx);
   auto stream = runtime::getCurrentCUDAStream();
-//  CUDA_CALL(cudaStreamWaitEvent(stream, _event));
+  //  CUDA_CALL(cudaStreamWaitEvent(stream, _event));
 
   NDArray new_len_tensor;
   if (TensorDispatcher::Global()->IsAvailable()) {
@@ -452,7 +529,7 @@ int64_t DeviceBitmap::unique(IdType *out_row) {
         _bitmap, _num_buckets, _offset, out_row);
   });
 
-  device->StreamSync(_ctx, stream); // don't need to record event
+  device->StreamSync(_ctx, stream);  // don't need to record event
   _num_unique = new_len_tensor.Ptr<OffsetType>()[0];
 
   return _num_unique;
@@ -463,7 +540,7 @@ void DeviceBitmap::map(const IdType *row, int64_t num_rows, IdType *out_row) {
   buildOffset();
   auto device = runtime::DeviceAPI::Get(_ctx);
   auto stream = runtime::getCurrentCUDAStream();
-//  CUDA_CALL(cudaStreamWaitEvent(stream, _event));
+  //  CUDA_CALL(cudaStreamWaitEvent(stream, _event));
 
   const dim3 block(BlockSize);
   const dim3 grid((num_rows * _comp_ratio + block.x - 1) / block.x);
@@ -471,18 +548,43 @@ void DeviceBitmap::map(const IdType *row, int64_t num_rows, IdType *out_row) {
   ATEN_COMP_RATIO_SWITCH(_comp_ratio, COMP_RATIO, {
     CUDA_KERNEL_CALL(
         (impl::map_kernel<IdType, COMP_RATIO>), grid, block, 0, stream, iter,
-        _offset, row, num_rows, out_row);
+        _num_advance, 0, row, num_rows, out_row);
   });
+  //  device->StreamSync(_ctx, stream);
+  CUDA_CALL(cudaEventRecord(_event, stream));
+};
 
+template <typename IdType>
+void DeviceBitmap::map_uncheck(const IdType *row, int64_t num_rows, IdType *out_row) {
+  buildOffset();
+  auto device = runtime::DeviceAPI::Get(_ctx);
+  auto stream = runtime::getCurrentCUDAStream();
+  //  CUDA_CALL(cudaStreamWaitEvent(stream, _event));
+
+  const dim3 block(BlockSize);
+  const dim3 grid((num_rows * _comp_ratio + block.x - 1) / block.x);
+  DeviceBitIterator iter(_bitmap, _num_buckets, 0);
+  ATEN_COMP_RATIO_SWITCH(_comp_ratio, COMP_RATIO, {
+    CUDA_KERNEL_CALL(
+        (impl::map_uncheck_kernel<IdType, COMP_RATIO>), grid, block, 0, stream, iter,
+        _num_advance, _offset, row, num_rows, out_row);
+  });
+  //  device->StreamSync(_ctx, stream);
   CUDA_CALL(cudaEventRecord(_event, stream));
 };
 
 template void DeviceBitmap::flag<int32_t>(const int32_t *, int64_t);
 template void DeviceBitmap::flag<int64_t>(const int64_t *, int64_t);
 
+template void DeviceBitmap::unflag<int32_t>(const int32_t *, int64_t);
+template void DeviceBitmap::unflag<int64_t>(const int64_t *, int64_t);
+
 template int64_t DeviceBitmap::unique<int32_t>(int32_t *);
 template int64_t DeviceBitmap::unique<int64_t>(int64_t *);
 
 template void DeviceBitmap::map<int32_t>(const int32_t *, int64_t, int32_t *);
 template void DeviceBitmap::map<int64_t>(const int64_t *, int64_t, int64_t *);
+
+template void DeviceBitmap::map_uncheck<int32_t>(const int32_t *, int64_t, int32_t *);
+template void DeviceBitmap::map_uncheck<int64_t>(const int64_t *, int64_t, int64_t *);
 }  // namespace dgl::dev
