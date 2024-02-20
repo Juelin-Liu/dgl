@@ -374,7 +374,6 @@ DeviceBitmap::DeviceBitmap(int64_t num_elems, DGLContext ctx, int comp_ratio) {
   _offset = static_cast<OffsetType *>(device->AllocWorkspace(_ctx, _num_offset * sizeof(OffsetType)));
   _temp_storage_bytes = 1024 * 1024;
   _d_temp_storage = device->AllocWorkspace(_ctx, _temp_storage_bytes);
-  LOG(INFO) << "creating bitmap with num elems: " << num_elems << " on ctx " <<_ctx;
 }
 
 DeviceBitmap::~DeviceBitmap() {

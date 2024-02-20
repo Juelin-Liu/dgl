@@ -67,68 +67,36 @@ NDArray ScatteredArrayObject::shuffle_forward(
   CHECK_EQ(feat->shape[0], unique_array->shape[0]);
   CHECK_EQ(feat->ndim, 2);
   CHECK_EQ(feat->shape[0], _unique_dim);
-  cudaStream_t stream = runtime::getCurrentCUDAStream();
-
-  NDArray toShuffle = NDArray::Empty(
-      {gather_idx_in_unique_out_shuffled->shape[0], feat->shape[1]},
-      feat->dtype, feat->ctx);
-
-  IndexSelect(feat, gather_idx_in_unique_out_shuffled, toShuffle, stream);
-
-  NDArray feat_shuffled;
-  NDArray feat_offsets;
-  cudaDeviceSynchronize();
-  CHECK_EQ(
-      global_src_offset.ToVector<int64_t>()[world_size],
-      toShuffle->shape[0]);
-
-  std::tie(feat_shuffled, feat_offsets) = dev::Alltoall(
+  auto stream = runtime::getCurrentCUDAStream();
+  auto toShuffle = IndexSelect(feat, gather_idx_in_unique_out_shuffled, stream);
+  auto [feat_shuffled, feat_offsets] = dev::Alltoall(
       rank, world_size, toShuffle, global_src_offset, local_unique_src_offset, stream, _nccl_comm);
 
-  const int num_nodes = feat_shuffled->shape[0] / feat->shape[1];
-
-  NDArray feat_shuffled_reshape =
-      feat_shuffled.CreateView({num_nodes, feat->shape[1]}, feat->dtype, 0);
-  NDArray partDiscFeat = NDArray::Empty(
-      {feat_shuffled_reshape->shape[0], feat->shape[1]}, feat_shuffled->dtype,
-      feat->ctx);
-  IndexSelect(
-      feat_shuffled_reshape, scatter_idx, partDiscFeat,
-      stream);
-
-  CHECK_EQ(partDiscFeat->shape[0], _scatter_dim);
-  return partDiscFeat;
+  int64_t num_nodes = feat_shuffled->shape[0] / feat->shape[1];
+  auto feat_shuffled_reshape = feat_shuffled.CreateView({num_nodes, feat->shape[1]}, feat->dtype, 0);
+  return IndexSelect(feat_shuffled_reshape, scatter_idx, stream);
 }
 
 NDArray ScatteredArrayObject::shuffle_backward(
     const NDArray &back_grad, int rank, int world_size) const {
   CHECK_EQ(back_grad->shape[0], _scatter_dim);
   cudaStream_t stream = runtime::getCurrentCUDAStream();
-  // backgrad is part disccont
-  NDArray part_cont = NDArray::Empty(
-      {send_offset->shape[0], back_grad->shape[1]},
-      back_grad->dtype, back_grad->ctx);
-  //      atomic_accumulation(part_cont, idx_original_to_part_cont, back_grad);
-  //      assert(idx_original_to_part_cont->shape[0]!=back_grad->shape[0]);
-  IndexSelect(back_grad, gather_idx, part_cont, stream);
+  auto part_cont = IndexSelect(back_grad, gather_idx, stream);
 
-  NDArray grad_shuffled;
-  NDArray grad_offsets;
-
-  std::tie(grad_shuffled, grad_offsets) = dev::Alltoall(
+  auto [grad_shuffled, grad_offsets] = dev::Alltoall(
       rank, world_size, part_cont, local_unique_src_offset,
       global_src_offset, stream, _nccl_comm);
 
-  const int num_nodes = grad_shuffled->shape[0] / back_grad->shape[1];
+  int64_t num_nodes = grad_shuffled->shape[0] / back_grad->shape[1];
 
-  NDArray grad_shuffled_reshape = grad_shuffled.CreateView(
+  auto grad_shuffled_reshape = grad_shuffled.CreateView(
       {num_nodes, back_grad->shape[1]}, back_grad->dtype, 0);
 
-  cudaStreamSynchronize(stream);
+//  cudaStreamSynchronize(stream);
 
   // offsets are always long
-  auto grad_offsets_v = grad_offsets.ToVector<int64_t>();
-  CHECK_EQ(back_grad->dtype.bits, 32);
+//  auto grad_offsets_v = grad_offsets.ToVector<int64_t>();
+//  CHECK_EQ(back_grad->dtype.bits, 32);
 
   NDArray accumulated_grads = aten::Full(
       (float)0.0, unique_array->shape[0] * back_grad->shape[1], back_grad->ctx);
@@ -196,18 +164,39 @@ void Scatter(
     array->_unique_dim = h_num_item;
     array->unique_array = unique.CreateView({array->_unique_dim}, dtype);
 
-//    auto bitmap = getBitmap(array->_v_num, ctx);
-//    bitmap->flag(
-//        array->global_src.Ptr<IdType>(), array->global_src.NumElements());
-//    NDArray unique_arr =
-//        NDArray::Empty({array->global_src.NumElements()}, dtype, ctx);
-//    array->gather_idx_in_unique_out_shuffled =
-//        NDArray::Empty({array->global_src.NumElements()}, dtype, ctx);
-//
+    // debugging bitmap
+    auto bitmap = getBitmap(array->_v_num, ctx);
+    bitmap->flag(
+        array->global_src.Ptr<IdType>(), array->global_src.NumElements());
+    NDArray unique_arr =
+        NDArray::Empty({array->global_src.NumElements()}, dtype, ctx);
+   auto gather_idx_in_unique_out_shuffled =
+        NDArray::Empty({array->global_src.NumElements()}, dtype, ctx);
+    auto num_unique = bitmap->unique(unique_arr.Ptr<IdType>());
 //    array->_unique_dim = bitmap->unique(unique_arr.Ptr<IdType>());
-//    bitmap->map(array->global_src.Ptr<IdType>(),array->global_src.NumElements(),
-//               array->gather_idx_in_unique_out_shuffled.Ptr<IdType>());
-//    array->unique_array = unique_arr.CreateView({array->_unique_dim}, dtype);
+    bitmap->map(array->global_src.Ptr<IdType>(),array->global_src.NumElements(),
+               gather_idx_in_unique_out_shuffled.Ptr<IdType>());
+    unique_arr = unique_arr.CreateView({num_unique}, dtype);
+    CHECK_EQ(num_unique, h_num_item);
+    if (true) {
+      auto cor_unique = array->gather_idx_in_unique_out_shuffled.ToVector<int64_t >();
+      auto inc_unique = gather_idx_in_unique_out_shuffled.ToVector<int64_t >();
+
+      auto max_cor = *std::max_element(cor_unique.begin(), cor_unique.end());
+      auto max_inc = inc_unique[inc_unique.size() - 1];
+//      std::sort(cor_unique.begin(), cor_unique.end());
+//      std::sort(inc_unique.begin(), inc_unique.end());
+//
+//      auto cor = NDArray::FromVector(cor_unique);
+//      auto inc = NDArray::FromVector(inc_unique);
+//      LOG(INFO) << "incorrect: " << inc
+//                << "\ncorrect: " << cor
+//                << "\nmax incorrect: " << inc_unique[num_unique - 1]
+//                << "\nmax correct: " << inc_unique[num_unique - 1];
+//      CHECK(std::equal(inc_unique.begin(), inc_unique.end(), cor_unique.begin()));
+      CHECK_EQ(inc_unique.size(), cor_unique.size());
+      CHECK_EQ(max_cor, max_inc);
+    }
   });
 //  LOG(INFO) << "rank " << rank << " done mapping";
 }
