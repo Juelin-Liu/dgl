@@ -7,35 +7,36 @@
 #include <utility>
 
 #include "../runtime/cuda/cuda_common.h"
-//#include "../runtime/cuda/cuda_hashtable.cuh"
+// #include "../runtime/cuda/cuda_hashtable.cuh"
 #include "cuda/all2all.h"
+#include "cuda/bitmap.h"
 #include "cuda/gather.h"
 #include "cuda/index_select.cuh"
 #include "cuda/map_edges.cuh"
 #include "cuda/partition.h"
-#include "cuda/bitmap.h"
 
 namespace dgl::dev {
 using namespace runtime;
 
-#define ATEN_PIDX_TYPE_SWITCH(val, PIDType, ...)                   \
-  do {                                                          \
-    CHECK_EQ((val).code, kDGLInt) << "ID must be integer type";   \
-    if ((val).bits == 8) {                                                          \
-      typedef int8_t PIDType;                                     \
-      {__VA_ARGS__} \
-    } else if ((val).bits == 16) {                                     \
-      typedef int16_t PIDType;                                   \
-      { __VA_ARGS__ }                                           \
-    } else if ((val).bits == 32) {                                     \
-      typedef int32_t PIDType;                                   \
-      { __VA_ARGS__ }                                           \
-    } else if ((val).bits == 64) {                              \
-      typedef int64_t PIDType;                                   \
-      { __VA_ARGS__ }                                           \
-    } else {                                                    \
-      LOG(FATAL) << "Partition index can only be, int8_t, int16_t, int32 or int64";            \
-    }                                                           \
+#define ATEN_PIDX_TYPE_SWITCH(val, PIDType, ...)                             \
+  do {                                                                       \
+    CHECK_EQ((val).code, kDGLInt) << "ID must be integer type";              \
+    if ((val).bits == 8) {                                                   \
+      typedef int8_t PIDType;                                                \
+      { __VA_ARGS__ }                                                        \
+    } else if ((val).bits == 16) {                                           \
+      typedef int16_t PIDType;                                               \
+      { __VA_ARGS__ }                                                        \
+    } else if ((val).bits == 32) {                                           \
+      typedef int32_t PIDType;                                               \
+      { __VA_ARGS__ }                                                        \
+    } else if ((val).bits == 64) {                                           \
+      typedef int64_t PIDType;                                               \
+      { __VA_ARGS__ }                                                        \
+    } else {                                                                 \
+      LOG(FATAL)                                                             \
+          << "Partition index can only be, int8_t, int16_t, int32 or int64"; \
+    }                                                                        \
   } while (0)
 
 template <typename IndexType>
@@ -70,10 +71,12 @@ NDArray ScatteredArrayObject::shuffle_forward(
   auto stream = runtime::getCurrentCUDAStream();
   auto toShuffle = IndexSelect(feat, gather_idx_in_unique_out_shuffled, stream);
   auto [feat_shuffled, feat_offsets] = dev::Alltoall(
-      rank, world_size, toShuffle, global_src_offset, local_unique_src_offset, stream, _nccl_comm);
+      rank, world_size, toShuffle, global_src_offset, local_unique_src_offset,
+      stream, _nccl_comm);
 
   int64_t num_nodes = feat_shuffled->shape[0] / feat->shape[1];
-  auto feat_shuffled_reshape = feat_shuffled.CreateView({num_nodes, feat->shape[1]}, feat->dtype, 0);
+  auto feat_shuffled_reshape =
+      feat_shuffled.CreateView({num_nodes, feat->shape[1]}, feat->dtype, 0);
   return IndexSelect(feat_shuffled_reshape, scatter_idx, stream);
 }
 
@@ -84,19 +87,19 @@ NDArray ScatteredArrayObject::shuffle_backward(
   auto part_cont = IndexSelect(back_grad, gather_idx, stream);
 
   auto [grad_shuffled, grad_offsets] = dev::Alltoall(
-      rank, world_size, part_cont, local_unique_src_offset,
-      global_src_offset, stream, _nccl_comm);
+      rank, world_size, part_cont, local_unique_src_offset, global_src_offset,
+      stream, _nccl_comm);
 
   int64_t num_nodes = grad_shuffled->shape[0] / back_grad->shape[1];
 
   auto grad_shuffled_reshape = grad_shuffled.CreateView(
       {num_nodes, back_grad->shape[1]}, back_grad->dtype, 0);
 
-//  cudaStreamSynchronize(stream);
+  //  cudaStreamSynchronize(stream);
 
   // offsets are always long
-//  auto grad_offsets_v = grad_offsets.ToVector<int64_t>();
-//  CHECK_EQ(back_grad->dtype.bits, 32);
+  //  auto grad_offsets_v = grad_offsets.ToVector<int64_t>();
+  //  CHECK_EQ(back_grad->dtype.bits, 32);
 
   NDArray accumulated_grads = aten::Full(
       (float)0.0, unique_array->shape[0] * back_grad->shape[1], back_grad->ctx);
@@ -125,6 +128,9 @@ void Scatter(
   auto ctx = array->ctx;
   auto dtype = array->dtype;
   auto device = runtime::DeviceAPI::Get(ctx);
+  auto bitmap = getBitmap(
+      array->_v_num,
+      ctx);  // initialize bitmap at the beginning to avoid memset overhead
 
   cudaStream_t stream = runtime::getCurrentCUDAStream();
   array->_scatter_dim = local_unique_src->shape[0];
@@ -140,64 +146,89 @@ void Scatter(
   std::tie(array->global_src, array->global_src_offset) = dev::Alltoall(
       rank, world_size, array->send_offset, array->local_unique_src_offset,
       aten::NullArray(), stream, array->_nccl_comm);
-//  LOG(INFO) << "rank " << rank << " start mapping";
+  //  LOG(INFO) << "rank " << rank << " start mapping";
   ATEN_ID_TYPE_SWITCH(array->global_src->dtype, IdType, {
-    const auto& arr = array->global_src;
-    auto num_input = array->global_src.NumElements();
-    NDArray unique = NDArray::Empty({num_input}, arr->dtype, ctx);
-    array->gather_idx_in_unique_out_shuffled = NDArray::Empty({num_input}, arr->dtype, ctx);
-
-    static int64_t *d_num_item{nullptr};
-    if (d_num_item == nullptr) d_num_item = static_cast<int64_t *>(device->AllocWorkspace(ctx, sizeof(int64_t)));
-
-    int64_t h_num_item{0};
-    auto hash_table =
-        runtime::cuda::OrderedHashTable<IdType>(num_input, ctx, stream);
-    hash_table.FillWithDuplicates(
-        arr.Ptr<IdType>(), num_input, unique.Ptr<IdType>(), d_num_item,
-        stream);
-    CUDA_CALL(cudaMemcpyAsync(
-        &h_num_item, d_num_item, sizeof(int64_t), cudaMemcpyDeviceToHost,
-        stream));
-    GPUMapEdges(arr, array->gather_idx_in_unique_out_shuffled, hash_table, stream);
-//    device->StreamSync(ctx, stream); // not necessary since GPUMapEdges will sync the stream
-    array->_unique_dim = h_num_item;
-    array->unique_array = unique.CreateView({array->_unique_dim}, dtype);
-
-    // debugging bitmap
-    auto bitmap = getBitmap(array->_v_num, ctx);
+    //    const auto& arr = array->global_src;
+    //    auto num_input = array->global_src.NumElements();
+    //    NDArray unique = NDArray::Empty({num_input}, arr->dtype, ctx);
+    //    array->gather_idx_in_unique_out_shuffled = NDArray::Empty({num_input},
+    //    arr->dtype, ctx);
+    //
+    //    static int64_t *d_num_item{nullptr};
+    //    if (d_num_item == nullptr) d_num_item = static_cast<int64_t
+    //    *>(device->AllocWorkspace(ctx, sizeof(int64_t)));
+    //
+    //    int64_t h_num_item{0};
+    //    auto hash_table =
+    //        runtime::cuda::OrderedHashTable<IdType>(num_input, ctx, stream);
+    //    hash_table.FillWithDuplicates(
+    //        arr.Ptr<IdType>(), num_input, unique.Ptr<IdType>(), d_num_item,
+    //        stream);
+    //    CUDA_CALL(cudaMemcpyAsync(
+    //        &h_num_item, d_num_item, sizeof(int64_t), cudaMemcpyDeviceToHost,
+    //        stream));
+    //    GPUMapEdges(arr, array->gather_idx_in_unique_out_shuffled, hash_table,
+    //    stream);
+    ////    device->StreamSync(ctx, stream); // not necessary since GPUMapEdges
+    ///will sync the stream
+    //    array->_unique_dim = h_num_item;
+    //    array->unique_array = unique.CreateView({array->_unique_dim}, dtype);
     bitmap->flag(
         array->global_src.Ptr<IdType>(), array->global_src.NumElements());
     NDArray unique_arr =
         NDArray::Empty({array->global_src.NumElements()}, dtype, ctx);
-   auto gather_idx_in_unique_out_shuffled =
+    array->gather_idx_in_unique_out_shuffled =
         NDArray::Empty({array->global_src.NumElements()}, dtype, ctx);
-    auto num_unique = bitmap->unique(unique_arr.Ptr<IdType>());
-//    array->_unique_dim = bitmap->unique(unique_arr.Ptr<IdType>());
-    bitmap->map(array->global_src.Ptr<IdType>(),array->global_src.NumElements(),
-               gather_idx_in_unique_out_shuffled.Ptr<IdType>());
-    unique_arr = unique_arr.CreateView({num_unique}, dtype);
-    CHECK_EQ(num_unique, h_num_item);
-    if (true) {
-      auto cor_unique = array->gather_idx_in_unique_out_shuffled.ToVector<int64_t >();
-      auto inc_unique = gather_idx_in_unique_out_shuffled.ToVector<int64_t >();
 
-      auto max_cor = *std::max_element(cor_unique.begin(), cor_unique.end());
-      auto max_inc = inc_unique[inc_unique.size() - 1];
-//      std::sort(cor_unique.begin(), cor_unique.end());
-//      std::sort(inc_unique.begin(), inc_unique.end());
-//
-//      auto cor = NDArray::FromVector(cor_unique);
-//      auto inc = NDArray::FromVector(inc_unique);
-//      LOG(INFO) << "incorrect: " << inc
-//                << "\ncorrect: " << cor
-//                << "\nmax incorrect: " << inc_unique[num_unique - 1]
-//                << "\nmax correct: " << inc_unique[num_unique - 1];
-//      CHECK(std::equal(inc_unique.begin(), inc_unique.end(), cor_unique.begin()));
-      CHECK_EQ(inc_unique.size(), cor_unique.size());
-      CHECK_EQ(max_cor, max_inc);
-    }
+    array->_unique_dim = bitmap->unique(unique_arr.Ptr<IdType>());
+    bitmap->map(
+        array->global_src.Ptr<IdType>(), array->global_src.NumElements(),
+        array->gather_idx_in_unique_out_shuffled.Ptr<IdType>());
+    array->unique_array = unique_arr.CreateView({array->_unique_dim}, dtype);
+    // debugging bitmap
+    //    auto bitmap = getBitmap(array->_v_num, ctx);
+    //    bitmap->flag(
+    //        array->global_src.Ptr<IdType>(), array->global_src.NumElements());
+    //    NDArray unique_arr =
+    //        NDArray::Empty({array->global_src.NumElements()}, dtype, ctx);
+    //   auto gather_idx_in_unique_out_shuffled =
+    //        NDArray::Empty({array->global_src.NumElements()}, dtype, ctx);
+    //    auto num_unique = bitmap->unique(unique_arr.Ptr<IdType>());
+    ////    array->_unique_dim = bitmap->unique(unique_arr.Ptr<IdType>());
+    //    bitmap->map(array->global_src.Ptr<IdType>(),array->global_src.NumElements(),
+    //               gather_idx_in_unique_out_shuffled.Ptr<IdType>());
+    //    unique_arr = unique_arr.CreateView({num_unique}, dtype);
+    //    CHECK_EQ(num_unique, h_num_item);
+    //    if (true) {
+    //      auto cor_mapped =
+    //      array->gather_idx_in_unique_out_shuffled.ToVector<int64_t >(); auto
+    //      inc_mapped = gather_idx_in_unique_out_shuffled.ToVector<int64_t >();
+    //
+    //      auto max_cor_mapped = *std::max_element(cor_mapped.begin(),
+    //      cor_mapped.end()); auto min_cor_mapped =
+    //      *std::min_element(cor_mapped.begin(), cor_mapped.end());
+    //
+    //      auto max_inc_mapped =  *std::max_element(inc_mapped.begin(),
+    //      inc_mapped.end()); auto min_inc_mapped =
+    //      *std::min_element(inc_mapped.begin(), inc_mapped.end());
+    ////      std::sort(cor_unique.begin(), cor_unique.end());
+    ////      std::sort(inc_unique.begin(), inc_unique.end());
+    ////
+    ////      auto cor = NDArray::FromVector(cor_unique);
+    ////      auto inc = NDArray::FromVector(inc_unique);
+    ////      LOG(INFO) << "incorrect: " << inc
+    ////                << "\ncorrect: " << cor
+    ////                << "\nmax incorrect: " << inc_unique[num_unique - 1]
+    ////                << "\nmax correct: " << inc_unique[num_unique - 1];
+    ////      CHECK(std::equal(inc_unique.begin(), inc_unique.end(),
+    ///cor_unique.begin()));
+    //      CHECK_EQ(inc_mapped.size(), cor_mapped.size());
+    //      CHECK_EQ(min_cor_mapped, 0);
+    //      CHECK_EQ(max_cor_mapped, num_unique - 1);
+    //      CHECK_EQ(min_inc_mapped, 0);
+    //      CHECK_EQ(max_cor_mapped, max_inc_mapped) << " rank " << rank;
+    //    }
   });
-//  LOG(INFO) << "rank " << rank << " done mapping";
+  //  LOG(INFO) << "rank " << rank << " done mapping";
 }
 }  // namespace dgl::dev

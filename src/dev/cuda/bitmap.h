@@ -107,6 +107,7 @@ static std::shared_ptr<DeviceBitmap> getBitmap(int64_t num_elems, DGLContext ctx
     bitmap->reset();
   }
   return bitmap;
+//  return std::make_shared<DeviceBitmap>(num_elems, ctx, comp_ratio);
 };
 
 }  // namespace dgl::dev

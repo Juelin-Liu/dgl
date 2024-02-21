@@ -249,30 +249,31 @@ template <typename IdType, int CompRatio>
 __global__ void map_kernel(
     DeviceBitIterator iter, const uint32_t advance, const OffsetType *offset,
     const IdType *row, int64_t num_rows, IdType *out_row) {
-  assert(blockDim.x == BlockSize && CompRatio <= 32);
+//  assert(blockDim.x == BlockSize && CompRatio <= 32);
   const int64_t tIdx = threadIdx.x + blockIdx.x * blockDim.x;
   const int32_t rIdx = tIdx / CompRatio;
   const int32_t tOffset = tIdx % CompRatio;
   typedef cub::WarpReduce<int, CompRatio> WarpReduce;
-  __shared__
-      typename WarpReduce::TempStorage temp_storage[BlockSize / CompRatio];
+  __shared__ typename WarpReduce::TempStorage temp_storage[BlockSize / CompRatio];
 
   if (rIdx < num_rows) {
     const IdType id = row[rIdx];
     assert(iter[id] == true);
-    const int32_t bucket_idx = id / BucketWidth;
+    const int32_t bucket_idx = (id / (BucketWidth * CompRatio)) * CompRatio;
     const int32_t total_num_bits = id % (BucketWidth * CompRatio); // excluding the [id]-th bit
 
     int32_t num_bits = std::max(
         0, std::min(BucketWidth, total_num_bits - tOffset * BucketWidth));
-    ;
 
     const int bitcnt = iter.popcnt(bucket_idx + tOffset, num_bits);
+    const int loc_bitcnt=bitcnt;
     const int group_id = threadIdx.x / CompRatio;
     const int agg_bitcnt = WarpReduce(temp_storage[group_id]).Sum(bitcnt);
     if (tOffset == 0) {
       const int32_t offset_idx = id / (BucketWidth * CompRatio);
-      out_row[rIdx] = offset[offset_idx] + agg_bitcnt + advance;
+      auto mapped_id = offset[offset_idx] + agg_bitcnt + advance;
+      out_row[rIdx] = mapped_id;
+//      if (mapped_id <= 1) printf("tIdx: %ld id: %d offset_idx: %d offset: %d loc_bits: %d agg_bits: %d num_bits: %d advance: %u out_id: %d\n", tIdx, (int)id, offset_idx, offset[offset_idx], loc_bitcnt, agg_bitcnt, num_bits, advance, mapped_id);
     }
   }
 }
@@ -292,7 +293,7 @@ __global__ void map_uncheck_kernel(
   if (rIdx < num_rows) {
     const IdType id = row[rIdx];
     if (iter[id]) {
-      const int32_t bucket_idx = id / BucketWidth;
+      const int32_t bucket_idx = (id / (BucketWidth * CompRatio)) * CompRatio;
       const int32_t total_num_bits = id % (BucketWidth * CompRatio); // excluding the [id]-th bit
 
       int32_t num_bits = std::max(
@@ -306,8 +307,6 @@ __global__ void map_uncheck_kernel(
         const int32_t offset_idx = id / (BucketWidth * CompRatio);
         out_row[rIdx] = offset[offset_idx] + agg_bitcnt + advance;
       }
-      // printf("tIdx: %lld start %d loc_id: %d num_bits: %d\n", tIdx, start,
-      // loc_id, num_bits);
     }
   }
 }
@@ -374,6 +373,8 @@ DeviceBitmap::DeviceBitmap(int64_t num_elems, DGLContext ctx, int comp_ratio) {
   _offset = static_cast<OffsetType *>(device->AllocWorkspace(_ctx, _num_offset * sizeof(OffsetType)));
   _temp_storage_bytes = 1024 * 1024;
   _d_temp_storage = device->AllocWorkspace(_ctx, _temp_storage_bytes);
+  _num_advance = 0;
+  LOG(INFO) << "bitmap: " << num_elems << " on " << _ctx;
 }
 
 DeviceBitmap::~DeviceBitmap() {
@@ -390,6 +391,7 @@ DeviceBitmap::~DeviceBitmap() {
 void DeviceBitmap::reset() {
   //  auto device = runtime::DeviceAPI::Get(_ctx);
   _offset_built = false;
+  _num_advance = 0;
   auto stream = runtime::getCurrentCUDAStream();
   CUDA_CALL(cudaStreamWaitEvent(
       stream, _event));  // must wait until all events have finished
@@ -537,8 +539,7 @@ void DeviceBitmap::map(const IdType *row, int64_t num_rows, IdType *out_row) {
   buildOffset();
   auto device = runtime::DeviceAPI::Get(_ctx);
   auto stream = runtime::getCurrentCUDAStream();
-  CUDA_CALL(cudaStreamWaitEvent(
-      stream, _event));  // any further cuda call on runtime stream must wait until memset is completed
+  CUDA_CALL(cudaStreamWaitEvent(stream, _event));  // any further cuda call on runtime stream must wait until memset is completed
   const dim3 block(BlockSize);
   const dim3 grid((num_rows * _comp_ratio + block.x - 1) / block.x);
   DeviceBitIterator iter(_bitmap, _num_buckets, 0);
