@@ -10,30 +10,28 @@
 
 namespace dgl::dev
 {
-  class GpuCache {
+  class FeatCache {
    private:
     NDArray _cached_feat;
     NDArray _pinned_feat;
     NDArray _label;
-    DeviceBitmap _bitmap;
-    bool inited{false};
-    void *feat_buff;
-    void *label_buff;
-
-    int64_t batch_id{0};
-    cudaEvent_t _event;
-    cudaStream_t _prefetch_stream;
+    DeviceBitmap _cached_bitmap;
+    bool init{false};
+    bool cached{false};
+    int64_t next_id{0};
+    DGLContext _ctx{};
+    cudaEvent_t _event{nullptr};
+    cudaStream_t _prefetch_stream{nullptr};
 
    public:
-    GpuFeatCache() = default;
+    FeatCache() = default;
+    ~FeatCache() = default;
 
-    void init(const NDArray& pinned_feat, const NDArray& cached_id);
+    void Init(DGLContext ctx, const NDArray& pinned_feat, const NDArray& cache_ids);
 
-    int64_t Prefetch(const NDArray& input_nodes, const NDArray& output_nodes);
+    NDArray Prefetch(const NDArray& input_nodes, cudaEvent_t event_to_wait = nullptr);
 
-    NDArray GetFeature(int64_t batch_id);
-
-    NDArray GetLabel(int64_t batch_id);
+    void Sync() const;
   };
 }
 #endif  // DGL_FEAT_CACHE_CUH

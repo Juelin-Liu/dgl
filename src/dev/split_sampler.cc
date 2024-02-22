@@ -5,10 +5,21 @@
 #include "split_sampler.h"
 #include "array_scatter.h"
 #include "cuda/all2all.h"
+#include "cuda_profiler_api.h"
 
 namespace dgl::dev {
 using namespace runtime;
 
+DGL_REGISTER_GLOBAL("dev._CAPI_cudaProfilerStart")
+  .set_body([](DGLArgs args, DGLRetValue *rv) {
+      CUDA_CALL(cudaProfilerStart());
+  });
+
+DGL_REGISTER_GLOBAL("dev._CAPI_cudaProfilerStop")
+  .set_body([](DGLArgs args, DGLRetValue *rv) {
+      CUDA_CALL(cudaProfilerStop());
+  });
+  
 DGL_REGISTER_GLOBAL("dev._CAPI_GetBlockScatteredSrc")
     .set_body([](DGLArgs args, DGLRetValue *rv) {
       int64_t batch_id = args[0];
@@ -66,6 +77,21 @@ DGL_REGISTER_GLOBAL("dev._CAPI_Split_SetGraph")
       NDArray data = args[2];
       auto sampler = SplitSampler::Global();
       sampler->setGraph(indptr, indices, data);
+    });
+
+DGL_REGISTER_GLOBAL("dev._CAPI_Split_InitFeatloader")
+    .set_body([](DGLArgs args, DGLRetValue *rv) {
+      NDArray pinned_feat = args[0];
+      NDArray cached_ids = args[1];
+      auto sampler = SplitSampler::Global();
+      sampler->initFeatCache(pinned_feat, cached_ids);
+    });
+
+DGL_REGISTER_GLOBAL("dev._CAPI_Split_GetFeature")
+    .set_body([](DGLArgs args, DGLRetValue *rv) {
+      int64_t batch_id = args[0];
+      auto sampler = SplitSampler::Global();
+      *rv = sampler->getFeature(batch_id);
     });
 
 DGL_REGISTER_GLOBAL("dev._CAPI_Split_SetPartitionMap")

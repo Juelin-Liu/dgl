@@ -190,25 +190,20 @@ NDArray IndexSelect(
 
 template <typename DType, typename IdType>
 void IndexSelect(
-    const NDArray &array, const IdArray &index, NDArray &ret,
+    const NDArray &array, const IdArray &index, void *ret_buff,
                   cudaStream_t stream) {
   bool is_pinned = array.IsPinned();
-  CHECK_EQ(array->ndim , ret->ndim);
   const int64_t arr_len = array->shape[0];
   const int64_t len = index->shape[0];
   int64_t num_feat = 1;
-  //            std::vector<int64_t> shape{len};
   for (int d = 1; d < array->ndim; ++d) {
     num_feat *= array->shape[d];
-    //                shape.emplace_back(array->shape[d]);
   }
 
-  ret->shape[1] = num_feat;
-  ret->shape[0] = len;
   // use index->ctx for pinned array
   if (len == 0 || arr_len * num_feat == 0)
     return;
-  auto *ret_data = static_cast<DType *>(ret->data);
+  auto *ret_data = static_cast<DType *>(ret_buff);
 
   const DType *array_data = static_cast<DType *>(cuda::GetDevicePointer(array));
   const IdType *idx_data = static_cast<IdType *>(index->data);
@@ -288,215 +283,215 @@ void IndexSelect(
   }
 }
 
-template NDArray IndexSelect<int8_t, int32_t>(
-    const NDArray &array, const IdArray &index,
-                                               cudaStream_t stream);
-
-template NDArray IndexSelect<int8_t, int64_t>(
-    const NDArray &array, const IdArray &index,
-                                               cudaStream_t stream);
-
-template NDArray IndexSelect<int16_t, int32_t>(
-    const NDArray &array, const IdArray &index,
-                                                cudaStream_t stream);
-
-template NDArray IndexSelect<int16_t, int64_t>(
-    const NDArray &array, const IdArray &index,
-                                                cudaStream_t stream);
-
-template NDArray IndexSelect<int32_t, int32_t>(
-    const NDArray &array, const IdArray &index,
-                                                cudaStream_t stream);
-
-template NDArray IndexSelect<int32_t, int64_t>(
-    const NDArray &array, const IdArray &index,
-                                                cudaStream_t stream);
-
-template NDArray IndexSelect<int64_t, int32_t>(
-    const NDArray &array, const IdArray &index,
-                                                cudaStream_t stream);
-
-template NDArray IndexSelect<int64_t, int64_t>(
-    const NDArray &array, const IdArray &index,
-                                                cudaStream_t stream);
-
-template NDArray IndexSelect<__half, int32_t>(
-    const NDArray &array, const IdArray &index,
-                                               cudaStream_t stream);
-
-template NDArray IndexSelect<__half, int64_t>(
-    const NDArray &array, const IdArray &index,
-                                               cudaStream_t stream);
-
-#ifdef BF16_ENABLED
-
-template NDArray IndexSelect<__nv_bfloat16, int32_t>(
-    const NDArray &array, const IdArray &index,
-                                                      cudaStream_t stream);
-
-template NDArray IndexSelect<__nv_bfloat16, int64_t>(
-    const NDArray &array, const IdArray &index,
-                                                      cudaStream_t stream);
-
-#endif // BF16_ENABLED
-
-template NDArray IndexSelect<float, int32_t>(
-    const NDArray &array, const IdArray &index,
-                                              cudaStream_t stream);
-
-template NDArray IndexSelect<float, int64_t>(
-    const NDArray &array, const IdArray &index,
-                                              cudaStream_t stream);
-
-template NDArray IndexSelect<double, int32_t>(
-    const NDArray &array, const IdArray &index,
-                                               cudaStream_t stream);
-
-template NDArray IndexSelect<double, int64_t>(
-    const NDArray &array, const IdArray &index,
-                                               cudaStream_t stream);
-
-// with buffer
-
-template void IndexSelect<int8_t, int32_t>(
-    const NDArray &array, const IdArray &index, NDArray &ret,
-                                            cudaStream_t stream);
-
-template void IndexSelect<int8_t, int64_t>(
-    const NDArray &array, const IdArray &index, NDArray &ret,
-                                            cudaStream_t stream);
-
-template void IndexSelect<int16_t, int32_t>(
-    const NDArray &array, const IdArray &index, NDArray &ret,
-                                             cudaStream_t stream);
-
-template void IndexSelect<int16_t, int64_t>(
-    const NDArray &array, const IdArray &index, NDArray &ret,
-                                             cudaStream_t stream);
-
-template void IndexSelect<int32_t, int32_t>(
-    const NDArray &array, const IdArray &index, NDArray &ret,
-                                             cudaStream_t stream);
-
-template void IndexSelect<int32_t, int64_t>(
-    const NDArray &array, const IdArray &index, NDArray &ret,
-                                             cudaStream_t stream);
-
-template void IndexSelect<int64_t, int32_t>(
-    const NDArray &array, const IdArray &index, NDArray &ret,
-                                             cudaStream_t stream);
-
-template void IndexSelect<int64_t, int64_t>(
-    const NDArray &array, const IdArray &index, NDArray &ret,
-                                             cudaStream_t stream);
-
-template void IndexSelect<__half, int32_t>(
-    const NDArray &array, const IdArray &index, NDArray &ret,
-                                            cudaStream_t stream);
-
-template void IndexSelect<__half, int64_t>(
-    const NDArray &array, const IdArray &index, NDArray &ret,
-                                            cudaStream_t stream);
-
-#ifdef BF16_ENABLED
-
-template void IndexSelect<__nv_bfloat16, int32_t>(
-    const NDArray &array, const IdArray &index, NDArray &ret,
-                                                   cudaStream_t stream);
-
-template void IndexSelect<__nv_bfloat16, int64_t>(
-    const NDArray &array, const IdArray &index, NDArray &ret,
-                                                   cudaStream_t stream);
-
-#endif // BF16_ENABLED
-
-template void IndexSelect<float, int32_t>(
-    const NDArray &array, const IdArray &index, NDArray &ret,
-                                           cudaStream_t stream);
-
-template void IndexSelect<float, int64_t>(
-    const NDArray &array, const IdArray &index, NDArray &ret,
-                                           cudaStream_t stream);
-
-template void IndexSelect<double, int32_t>(
-    const NDArray &array, const IdArray &index, NDArray &ret,
-                                            cudaStream_t stream);
-
-template void IndexSelect<double, int64_t>(
-    const NDArray &array, const IdArray &index, NDArray &ret,
-                                            cudaStream_t stream);
-
-// with buff and out index
-
-template void IndexSelect<int8_t, int32_t>(
-    const NDArray &array, const IdArray &in_index, const IdArray &out_index,
-                                            NDArray &ret, cudaStream_t stream);
-
-template void IndexSelect<int8_t, int64_t>(
-    const NDArray &array, const IdArray &in_index, const IdArray &out_index,
-                                            NDArray &ret, cudaStream_t stream);
-
-template void IndexSelect<int16_t, int32_t>(
-    const NDArray &array, const IdArray &in_index, const IdArray &out_index,
-                                             NDArray &ret, cudaStream_t stream);
-
-template void IndexSelect<int16_t, int64_t>(
-    const NDArray &array, const IdArray &in_index, const IdArray &out_index,
-                                             NDArray &ret, cudaStream_t stream);
-
-template void IndexSelect<int32_t, int32_t>(
-    const NDArray &array, const IdArray &in_index, const IdArray &out_index,
-                                             NDArray &ret, cudaStream_t stream);
-
-template void IndexSelect<int32_t, int64_t>(
-    const NDArray &array, const IdArray &in_index, const IdArray &out_index,
-                                             NDArray &ret, cudaStream_t stream);
-
-template void IndexSelect<int64_t, int32_t>(
-    const NDArray &array, const IdArray &in_index, const IdArray &out_index,
-                                             NDArray &ret, cudaStream_t stream);
-
-template void IndexSelect<int64_t, int64_t>(
-    const NDArray &array, const IdArray &in_index, const IdArray &out_index,
-                                             NDArray &ret, cudaStream_t stream);
-
-template void IndexSelect<__half, int32_t>(
-    const NDArray &array, const IdArray &in_index, const IdArray &out_index,
-                                            NDArray &ret, cudaStream_t stream);
-
-template void IndexSelect<__half, int64_t>(
-    const NDArray &array, const IdArray &in_index, const IdArray &out_index,
-                                            NDArray &ret, cudaStream_t stream);
-
-#ifdef BF16_ENABLED
-
-template void IndexSelect<__nv_bfloat16, int32_t>(
-    const NDArray &array, const IdArray &in_index, const IdArray &out_index,
-                                                   NDArray &ret,
-                                                   cudaStream_t stream);
-
-template void IndexSelect<__nv_bfloat16, int64_t>(
-    const NDArray &array, const IdArray &in_index, const IdArray &out_index,
-                                                   NDArray &ret,
-                                                   cudaStream_t stream);
-
-#endif // BF16_ENABLED
-
-template void IndexSelect<float, int32_t>(
-    const NDArray &array, const IdArray &in_index, const IdArray &out_index, NDArray &ret,
-                                           cudaStream_t stream);
-
-template void IndexSelect<float, int64_t>(
-    const NDArray &array, const IdArray &in_index, const IdArray &out_index, NDArray &ret,
-                                           cudaStream_t stream);
-
-template void IndexSelect<double, int32_t>(
-    const NDArray &array, const IdArray &in_index, const IdArray &out_index,
-                                            NDArray &ret, cudaStream_t stream);
-
-template void IndexSelect<double, int64_t>(
-    const NDArray &array, const IdArray &in_index, const IdArray &out_index,
-                                            NDArray &ret, cudaStream_t stream);
+//template NDArray IndexSelect<int8_t, int32_t>(
+//    const NDArray &array, const IdArray &index,
+//                                               cudaStream_t stream);
+//
+//template NDArray IndexSelect<int8_t, int64_t>(
+//    const NDArray &array, const IdArray &index,
+//                                               cudaStream_t stream);
+//
+//template NDArray IndexSelect<int16_t, int32_t>(
+//    const NDArray &array, const IdArray &index,
+//                                                cudaStream_t stream);
+//
+//template NDArray IndexSelect<int16_t, int64_t>(
+//    const NDArray &array, const IdArray &index,
+//                                                cudaStream_t stream);
+//
+//template NDArray IndexSelect<int32_t, int32_t>(
+//    const NDArray &array, const IdArray &index,
+//                                                cudaStream_t stream);
+//
+//template NDArray IndexSelect<int32_t, int64_t>(
+//    const NDArray &array, const IdArray &index,
+//                                                cudaStream_t stream);
+//
+//template NDArray IndexSelect<int64_t, int32_t>(
+//    const NDArray &array, const IdArray &index,
+//                                                cudaStream_t stream);
+//
+//template NDArray IndexSelect<int64_t, int64_t>(
+//    const NDArray &array, const IdArray &index,
+//                                                cudaStream_t stream);
+//
+//template NDArray IndexSelect<__half, int32_t>(
+//    const NDArray &array, const IdArray &index,
+//                                               cudaStream_t stream);
+//
+//template NDArray IndexSelect<__half, int64_t>(
+//    const NDArray &array, const IdArray &index,
+//                                               cudaStream_t stream);
+//
+//#ifdef BF16_ENABLED
+//
+//template NDArray IndexSelect<__nv_bfloat16, int32_t>(
+//    const NDArray &array, const IdArray &index,
+//                                                      cudaStream_t stream);
+//
+//template NDArray IndexSelect<__nv_bfloat16, int64_t>(
+//    const NDArray &array, const IdArray &index,
+//                                                      cudaStream_t stream);
+//
+//#endif // BF16_ENABLED
+//
+//template NDArray IndexSelect<float, int32_t>(
+//    const NDArray &array, const IdArray &index,
+//                                              cudaStream_t stream);
+//
+//template NDArray IndexSelect<float, int64_t>(
+//    const NDArray &array, const IdArray &index,
+//                                              cudaStream_t stream);
+//
+//template NDArray IndexSelect<double, int32_t>(
+//    const NDArray &array, const IdArray &index,
+//                                               cudaStream_t stream);
+//
+//template NDArray IndexSelect<double, int64_t>(
+//    const NDArray &array, const IdArray &index,
+//                                               cudaStream_t stream);
+//
+//// with buffer
+//
+//template void IndexSelect<int8_t, int32_t>(
+//    const NDArray &array, const IdArray &index, void *ret_buff,
+//                                            cudaStream_t stream);
+//
+//template void IndexSelect<int8_t, int64_t>(
+//    const NDArray &array, const IdArray &index, void *ret_buff,
+//                                            cudaStream_t stream);
+//
+//template void IndexSelect<int16_t, int32_t>(
+//    const NDArray &array, const IdArray &index, void *ret_buff,
+//                                             cudaStream_t stream);
+//
+//template void IndexSelect<int16_t, int64_t>(
+//    const NDArray &array, const IdArray &index, void *ret_buff,
+//                                             cudaStream_t stream);
+//
+//template void IndexSelect<int32_t, int32_t>(
+//    const NDArray &array, const IdArray &index, void *ret_buff,
+//                                             cudaStream_t stream);
+//
+//template void IndexSelect<int32_t, int64_t>(
+//    const NDArray &array, const IdArray &index, void *ret_buff,
+//                                             cudaStream_t stream);
+//
+//template void IndexSelect<int64_t, int32_t>(
+//    const NDArray &array, const IdArray &index, void *ret_buff,
+//                                             cudaStream_t stream);
+//
+//template void IndexSelect<int64_t, int64_t>(
+//    const NDArray &array, const IdArray &index, void *ret_buff,
+//                                             cudaStream_t stream);
+//
+//template void IndexSelect<__half, int32_t>(
+//    const NDArray &array, const IdArray &index, void *ret_buff,
+//                                            cudaStream_t stream);
+//
+//template void IndexSelect<__half, int64_t>(
+//    const NDArray &array, const IdArray &index, void *ret_buff,
+//                                            cudaStream_t stream);
+//
+//#ifdef BF16_ENABLED
+//
+//template void IndexSelect<__nv_bfloat16, int32_t>(
+//    const NDArray &array, const IdArray &index, void *ret_buff,
+//                                                   cudaStream_t stream);
+//
+//template void IndexSelect<__nv_bfloat16, int64_t>(
+//    const NDArray &array, const IdArray &index, void *ret_buff,
+//                                                   cudaStream_t stream);
+//
+//#endif // BF16_ENABLED
+//
+//template void IndexSelect<float, int32_t>(
+//    const NDArray &array, const IdArray &index, void *ret_buff,
+//                                           cudaStream_t stream);
+//
+//template void IndexSelect<float, int64_t>(
+//    const NDArray &array, const IdArray &index, void *ret_buff,
+//                                           cudaStream_t stream);
+//
+//template void IndexSelect<double, int32_t>(
+//    const NDArray &array, const IdArray &index, void *ret_buff,
+//                                            cudaStream_t stream);
+//
+//template void IndexSelect<double, int64_t>(
+//    const NDArray &array, const IdArray &index, void *ret_buff,
+//                                            cudaStream_t stream);
+//
+//// with buff and out index
+//
+//template void IndexSelect<int8_t, int32_t>(
+//    const NDArray &array, const IdArray &in_index, const IdArray &out_index,
+//                                            NDArray &ret, cudaStream_t stream);
+//
+//template void IndexSelect<int8_t, int64_t>(
+//    const NDArray &array, const IdArray &in_index, const IdArray &out_index,
+//                                            NDArray &ret, cudaStream_t stream);
+//
+//template void IndexSelect<int16_t, int32_t>(
+//    const NDArray &array, const IdArray &in_index, const IdArray &out_index,
+//                                             NDArray &ret, cudaStream_t stream);
+//
+//template void IndexSelect<int16_t, int64_t>(
+//    const NDArray &array, const IdArray &in_index, const IdArray &out_index,
+//                                             NDArray &ret, cudaStream_t stream);
+//
+//template void IndexSelect<int32_t, int32_t>(
+//    const NDArray &array, const IdArray &in_index, const IdArray &out_index,
+//                                             NDArray &ret, cudaStream_t stream);
+//
+//template void IndexSelect<int32_t, int64_t>(
+//    const NDArray &array, const IdArray &in_index, const IdArray &out_index,
+//                                             NDArray &ret, cudaStream_t stream);
+//
+//template void IndexSelect<int64_t, int32_t>(
+//    const NDArray &array, const IdArray &in_index, const IdArray &out_index,
+//                                             NDArray &ret, cudaStream_t stream);
+//
+//template void IndexSelect<int64_t, int64_t>(
+//    const NDArray &array, const IdArray &in_index, const IdArray &out_index,
+//                                             NDArray &ret, cudaStream_t stream);
+//
+//template void IndexSelect<__half, int32_t>(
+//    const NDArray &array, const IdArray &in_index, const IdArray &out_index,
+//                                            NDArray &ret, cudaStream_t stream);
+//
+//template void IndexSelect<__half, int64_t>(
+//    const NDArray &array, const IdArray &in_index, const IdArray &out_index,
+//                                            NDArray &ret, cudaStream_t stream);
+//
+//#ifdef BF16_ENABLED
+//
+//template void IndexSelect<__nv_bfloat16, int32_t>(
+//    const NDArray &array, const IdArray &in_index, const IdArray &out_index,
+//                                                   NDArray &ret,
+//                                                   cudaStream_t stream);
+//
+//template void IndexSelect<__nv_bfloat16, int64_t>(
+//    const NDArray &array, const IdArray &in_index, const IdArray &out_index,
+//                                                   NDArray &ret,
+//                                                   cudaStream_t stream);
+//
+//#endif // BF16_ENABLED
+//
+//template void IndexSelect<float, int32_t>(
+//    const NDArray &array, const IdArray &in_index, const IdArray &out_index, NDArray &ret,
+//                                           cudaStream_t stream);
+//
+//template void IndexSelect<float, int64_t>(
+//    const NDArray &array, const IdArray &in_index, const IdArray &out_index, NDArray &ret,
+//                                           cudaStream_t stream);
+//
+//template void IndexSelect<double, int32_t>(
+//    const NDArray &array, const IdArray &in_index, const IdArray &out_index,
+//                                            NDArray &ret, cudaStream_t stream);
+//
+//template void IndexSelect<double, int64_t>(
+//    const NDArray &array, const IdArray &in_index, const IdArray &out_index,
+//                                            NDArray &ret, cudaStream_t stream);
 
 NDArray IndexSelect(
     const NDArray &array, const IdArray &index, cudaStream_t stream) {
@@ -519,7 +514,7 @@ NDArray IndexSelect(
 }
 
 void IndexSelect(
-    const NDArray &array, const IdArray &index, NDArray &out_buff,
+    const NDArray &array, const IdArray &index, void *ret_buff,
                  cudaStream_t stream) {
 //  std::string header = "IndexSelect";
 //  if (index.NumElements() <= 8192) {
@@ -534,7 +529,7 @@ void IndexSelect(
 //  nvtx3::scoped_range index_select{header};
   ATEN_DTYPE_BITS_ONLY_SWITCH(array->dtype, DType, "values", {
     ATEN_ID_TYPE_SWITCH(index->dtype, IdType, {
-      return IndexSelect<DType, IdType>(array, index, out_buff, stream);
+      return IndexSelect<DType, IdType>(array, index, ret_buff, stream);
     });
   });
 }

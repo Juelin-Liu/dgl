@@ -10,8 +10,9 @@
 namespace dgl::dev {
 NDArray IndexSelect(
     const NDArray &array, const IdArray &index, cudaStream_t stream);
+
 void IndexSelect(
-    const NDArray &array, const IdArray &index, NDArray &out_buff,
+    const NDArray &array, const IdArray &index, void *out_buff,
                  cudaStream_t stream);
 void IndexSelect(
     const NDArray &array, const IdArray &index, const IdArray &out_idx,

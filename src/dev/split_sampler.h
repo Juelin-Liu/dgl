@@ -22,12 +22,14 @@
 #include "cuda/bitmap.h"
 #include "cuda/index_select.cuh"
 #include "cuda/map_edges.cuh"
+#include "cuda/feat_cache.cuh"
 
 namespace dgl::dev {
 
 struct SplitBatch {
   int64_t _batch_id{-1};
   int64_t _num_dp{0};
+  NDArray _feat{};
 
   bool reindexed{false};
   std::vector<aten::COOMatrix> _blocks;
@@ -59,6 +61,7 @@ class SplitSampler {
   NDArray _partition_map;
   std::vector<int64_t> _fanouts;
   std::shared_ptr<SplitBatch> _batch;
+  std::shared_ptr<FeatCache> _featloader{nullptr};
   int64_t _v_num{0};
   int64_t _e_num{0};
   int64_t _next_id{0};
@@ -68,6 +71,7 @@ class SplitSampler {
   int64_t _num_dp{0};  // number of dp layers
   ncclComm_t _nccl_comm{nullptr};
   bool _use_bitmap{false};
+  bool _use_featloader{false};
   DGLContext _ctx{};  // inferred from the ctx of the seeds
 
  public:
@@ -83,6 +87,13 @@ class SplitSampler {
   void initNcclComm(int64_t nranks, ncclUniqueId commId, int64_t rank) {
     auto res = ncclCommInitRank(&_nccl_comm, nranks, commId, rank);
     CHECK_EQ(res, ncclSuccess);
+  }
+
+  void initFeatCache(const NDArray& pinned_feat, const NDArray& cached_ids) {
+    CHECK_EQ(pinned_feat.IsPinned(), true);
+    _featloader = std::make_shared<FeatCache>();
+    _featloader->Init(_ctx, pinned_feat, cached_ids);
+    _use_featloader = true;
   }
 
   void setGraph(
@@ -155,6 +166,7 @@ class SplitSampler {
       num_dsts.push_back(frontier.NumElements());
 
       if (layer < _num_dp) {
+        CHECK_EQ(_num_dp, 0) << "does not support hybrid sampling for now";
         frontiers.push_back(unique_src);
       } else {
         auto partition_idx = IndexSelect(
@@ -176,6 +188,16 @@ class SplitSampler {
     int64_t batch_id = _next_id++;
     _batch = std::make_shared<SplitBatch>(
         batch_id, _num_dp, num_srcs, num_dsts, frontiers, blocks, scattered_arrays);
+
+    if (_use_featloader) {
+      static cudaEvent_t sampling_event{nullptr};
+      if (sampling_event == nullptr) {
+        CUDA_CALL(cudaEventCreate(&sampling_event));
+      }
+      CUDA_CALL(cudaEventRecord(sampling_event, runtime::getCurrentCUDAStream()));
+      _batch->_feat = _featloader->Prefetch(_batch->_frontiers.at(frontiers.size()-1), sampling_event);
+    }
+
     return batch_id;
   }
 
@@ -225,6 +247,13 @@ class SplitSampler {
     }
     CHECK_EQ(batch->_blockrefs.size(), batch->_blocks.size());
     return batch->_blockrefs.at(layer);
+  }
+
+  NDArray getFeature(int64_t batch_id) {
+    std::shared_ptr<SplitBatch> batch{_batch};
+    CHECK_EQ(batch->_batch_id, batch_id);
+    _featloader->Sync();
+    return batch->_feat;
   }
 
   NDArray getInputNode(int64_t batch_id) {

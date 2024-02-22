@@ -146,33 +146,35 @@ void Scatter(
   std::tie(array->global_src, array->global_src_offset) = dev::Alltoall(
       rank, world_size, array->send_offset, array->local_unique_src_offset,
       aten::NullArray(), stream, array->_nccl_comm);
-  //  LOG(INFO) << "rank " << rank << " start mapping";
+
   ATEN_ID_TYPE_SWITCH(array->global_src->dtype, IdType, {
-    //    const auto& arr = array->global_src;
-    //    auto num_input = array->global_src.NumElements();
-    //    NDArray unique = NDArray::Empty({num_input}, arr->dtype, ctx);
-    //    array->gather_idx_in_unique_out_shuffled = NDArray::Empty({num_input},
-    //    arr->dtype, ctx);
-    //
-    //    static int64_t *d_num_item{nullptr};
-    //    if (d_num_item == nullptr) d_num_item = static_cast<int64_t
-    //    *>(device->AllocWorkspace(ctx, sizeof(int64_t)));
-    //
-    //    int64_t h_num_item{0};
-    //    auto hash_table =
-    //        runtime::cuda::OrderedHashTable<IdType>(num_input, ctx, stream);
-    //    hash_table.FillWithDuplicates(
-    //        arr.Ptr<IdType>(), num_input, unique.Ptr<IdType>(), d_num_item,
-    //        stream);
-    //    CUDA_CALL(cudaMemcpyAsync(
-    //        &h_num_item, d_num_item, sizeof(int64_t), cudaMemcpyDeviceToHost,
-    //        stream));
-    //    GPUMapEdges(arr, array->gather_idx_in_unique_out_shuffled, hash_table,
-    //    stream);
-    ////    device->StreamSync(ctx, stream); // not necessary since GPUMapEdges
-    ///will sync the stream
-    //    array->_unique_dim = h_num_item;
-    //    array->unique_array = unique.CreateView({array->_unique_dim}, dtype);
+    // hashmap impl
+//        const auto& arr = array->global_src;
+//        auto num_input = array->global_src.NumElements();
+//        NDArray unique = NDArray::Empty({num_input}, arr->dtype, ctx);
+//        array->gather_idx_in_unique_out_shuffled = NDArray::Empty({num_input},
+//        arr->dtype, ctx);
+//
+//        static int64_t *d_num_item{nullptr};
+//        if (d_num_item == nullptr) d_num_item = static_cast<int64_t
+//        *>(device->AllocWorkspace(ctx, sizeof(int64_t)));
+//
+//        int64_t h_num_item{0};
+//        auto hash_table =
+//            runtime::cuda::OrderedHashTable<IdType>(num_input, ctx, stream);
+//        hash_table.FillWithDuplicates(
+//            arr.Ptr<IdType>(), num_input, unique.Ptr<IdType>(), d_num_item,
+//            stream);
+//        CUDA_CALL(cudaMemcpyAsync(
+//            &h_num_item, d_num_item, sizeof(int64_t), cudaMemcpyDeviceToHost,
+//            stream));
+//        GPUMapEdges(arr, array->gather_idx_in_unique_out_shuffled, hash_table,
+//        stream);
+//    //    device->StreamSync(ctx, stream); // not necessary since GPUMapEdges will sync the stream
+//        array->_unique_dim = h_num_item;
+//        array->unique_array = unique.CreateView({array->_unique_dim}, dtype);
+
+    // use bitmap to avoid explicit synchronization
     bitmap->flag(
         array->global_src.Ptr<IdType>(), array->global_src.NumElements());
     NDArray unique_arr =
@@ -185,50 +187,8 @@ void Scatter(
         array->global_src.Ptr<IdType>(), array->global_src.NumElements(),
         array->gather_idx_in_unique_out_shuffled.Ptr<IdType>());
     array->unique_array = unique_arr.CreateView({array->_unique_dim}, dtype);
-    // debugging bitmap
-    //    auto bitmap = getBitmap(array->_v_num, ctx);
-    //    bitmap->flag(
-    //        array->global_src.Ptr<IdType>(), array->global_src.NumElements());
-    //    NDArray unique_arr =
-    //        NDArray::Empty({array->global_src.NumElements()}, dtype, ctx);
-    //   auto gather_idx_in_unique_out_shuffled =
-    //        NDArray::Empty({array->global_src.NumElements()}, dtype, ctx);
-    //    auto num_unique = bitmap->unique(unique_arr.Ptr<IdType>());
-    ////    array->_unique_dim = bitmap->unique(unique_arr.Ptr<IdType>());
-    //    bitmap->map(array->global_src.Ptr<IdType>(),array->global_src.NumElements(),
-    //               gather_idx_in_unique_out_shuffled.Ptr<IdType>());
-    //    unique_arr = unique_arr.CreateView({num_unique}, dtype);
-    //    CHECK_EQ(num_unique, h_num_item);
-    //    if (true) {
-    //      auto cor_mapped =
-    //      array->gather_idx_in_unique_out_shuffled.ToVector<int64_t >(); auto
-    //      inc_mapped = gather_idx_in_unique_out_shuffled.ToVector<int64_t >();
-    //
-    //      auto max_cor_mapped = *std::max_element(cor_mapped.begin(),
-    //      cor_mapped.end()); auto min_cor_mapped =
-    //      *std::min_element(cor_mapped.begin(), cor_mapped.end());
-    //
-    //      auto max_inc_mapped =  *std::max_element(inc_mapped.begin(),
-    //      inc_mapped.end()); auto min_inc_mapped =
-    //      *std::min_element(inc_mapped.begin(), inc_mapped.end());
-    ////      std::sort(cor_unique.begin(), cor_unique.end());
-    ////      std::sort(inc_unique.begin(), inc_unique.end());
-    ////
-    ////      auto cor = NDArray::FromVector(cor_unique);
-    ////      auto inc = NDArray::FromVector(inc_unique);
-    ////      LOG(INFO) << "incorrect: " << inc
-    ////                << "\ncorrect: " << cor
-    ////                << "\nmax incorrect: " << inc_unique[num_unique - 1]
-    ////                << "\nmax correct: " << inc_unique[num_unique - 1];
-    ////      CHECK(std::equal(inc_unique.begin(), inc_unique.end(),
-    ///cor_unique.begin()));
-    //      CHECK_EQ(inc_mapped.size(), cor_mapped.size());
-    //      CHECK_EQ(min_cor_mapped, 0);
-    //      CHECK_EQ(max_cor_mapped, num_unique - 1);
-    //      CHECK_EQ(min_inc_mapped, 0);
-    //      CHECK_EQ(max_cor_mapped, max_inc_mapped) << " rank " << rank;
-    //    }
+
   });
-  //  LOG(INFO) << "rank " << rank << " done mapping";
+  //  LOG(INFO) << "rank " << rank << " done scatter";
 }
 }  // namespace dgl::dev
