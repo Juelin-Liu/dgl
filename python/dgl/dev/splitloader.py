@@ -11,7 +11,8 @@ _init_api("dgl.dev", __name__)
 
 
 class SplitGraphLoader:
-    def __init__(self, g: DGLGraph, partition_map: Tensor, target_idx: Tensor, ncclUniqueId, config: SampleConfig):
+    def __init__(self, g: DGLGraph, partition_map: Tensor, 
+                 target_idx: Tensor, ncclUniqueId, config: SampleConfig):
         assert (config.mode in ["uva", "gpu"])
         assert (config.fanouts is not None)
         assert (config.rank < device_count())
@@ -42,7 +43,9 @@ class SplitGraphLoader:
         indptr, indices, _ = self.g.adj_tensors("csc")
         self.host_partition_map = partition_map
         self.target_dtype = target_idx.dtype
-
+        self.featloader_inited = False
+        self.batch_id = 0
+        
         SetGraph(indptr, indices)
         SetFanout(config.fanouts)
         SetPartitionMap(config.num_partition, partition_map.to(self.device))
@@ -73,6 +76,13 @@ class SplitGraphLoader:
                                     shuffle=True)
         self.iter = iter(self.idx_loader)
 
+    def init_dataloader(self, pinned_feat: Tensor, cached_ids: Tensor):
+        InitFeatloader(pinned_feat, cached_ids)
+        self.featloader_inited = True
+    
+    def get_feature(self):
+        return GetFeature(self.batch_id)
+    
     def __iter__(self):
         self.iter = iter(self.idx_loader)
         return self
@@ -80,10 +90,10 @@ class SplitGraphLoader:
     def __next__(self) -> (Tensor, Tensor, list[DGLBlock]):
         seeds = next(self.iter)
         nvtx.range_push("start sampling")
-        batch_id = SampleBatch(seeds, self.replace)
+        self.batch_id = SampleBatch(seeds, self.replace)
         nvtx.range_pop()
 
         nvtx.range_push("create block")
-        ret = GetBlocks(batch_id, reindex=self.reindex, layers=len(self.fanouts))
+        ret = GetBlocks(self.batch_id, reindex=self.reindex, layers=len(self.fanouts))
         nvtx.range_pop()
         return ret

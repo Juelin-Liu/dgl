@@ -67,3 +67,9 @@ def GetBlocks(batch_id: int, reindex: bool = True, layers: int = 3, edge_data: b
 
         blocks.insert(0, block)
     return input_node, output_node, blocks
+
+def GetFeature(batch_id: int)->Tensor:
+    return from_dgl_nd(_CAPI_Split_GetFeature(batch_id))
+
+def InitFeatloader(pinned_feat: Tensor, cached_ids: Tensor):
+    _CAPI_Split_InitFeatloader(to_dgl_nd(pinned_feat), to_dgl_nd(cached_ids))
