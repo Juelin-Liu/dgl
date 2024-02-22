@@ -1,0 +1,104 @@
+import torch
+import torchmetrics.functional as MF
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.multiprocessing import spawn
+from utils import *
+from dgl.dev.splitloader import *
+from dgl.dev.splitmodel import get_distributed_model
+from dgl.dev import CudaProfilerStart, CudaProfilerStop
+
+def bench_split(config: Config):
+    graph, feat, label, train_idx, valid_idx, test_idx, num_label = load_data(config, is_pinned=True)
+    config.num_classes = num_label
+    
+    partition_map = None
+    if "random" not in config.partition_type:
+        partition_map = load_partition_map(config)
+    else:
+        print(f"using random with {config.num_partition} partitions")
+        v_num = graph.num_nodes()
+        partition_map = torch.randint(low=0, high=config.num_partition, size=(v_num,), dtype=torch.int8)
+    try:
+        unique_id = GetUniqueId()
+        spawn(train_split_ddp, args=(config, unique_id, graph, feat, label, train_idx, test_idx, partition_map),
+              nprocs=config.world_size)
+    except Exception as e:
+        print(f"error encountered with {config=}:", e)
+        exit(-1)
+
+
+def train_split_ddp(rank: int, config: Config, unique_id, 
+                    graph: dgl.DGLGraph, feat:torch.Tensor, label: torch.Tensor, 
+                    train_idx: torch.Tensor, test_idx: torch.Tensor, 
+                    partition_map: torch.Tensor):
+    ddp_setup(rank, config.world_size)
+    device = torch.cuda.current_device()
+    if rank == 0:
+        print(config)
+    mode = "uva"
+    graph = graph.pin_memory_()
+    feat_handle  = pin_memory_inplace(feat)
+    label = label.to(device)
+        
+    assert(partition_map.shape[0] == graph.num_nodes())
+    
+    model = get_distributed_model(rank, config.world_size, config.num_redundant_layer, 
+                                  config.model, feat.shape[1], len(config.fanouts), config.hid_size, config.num_classes)
+    model = model.to(device)
+    model = DDP(model, device_ids=[rank])
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    sample_config = SampleConfig(rank=rank, num_partition=config.num_partition, batch_size=config.batch_size,
+                                 world_size=config.world_size, mode=mode, fanouts=config.fanouts, reindex=True,
+                                 drop_last=True)
+
+    dataloader = SplitGraphLoader(graph, partition_map, train_idx, unique_id, sample_config)
+    dataloader.init_featloader(feat, torch.empty(size=(0,)))
+    step = 0
+    step_per_epoch = dataloader.max_step_per_epoch
+    
+    CudaProfilerStart()
+    print(f"sampling on device: {device}", flush=True)
+    timer = Timer()
+    for epoch in range(config.num_epoch):
+        for input_nodes, output_nodes, blocks in dataloader:
+            step += 1
+            batch_feat = dataloader.get_feature()
+            batch_label = label[output_nodes]
+            batch_pred = model(blocks, batch_feat)
+            batch_loss = torch.nn.functional.cross_entropy(batch_pred, batch_label)
+            optimizer.zero_grad()
+            batch_loss.backward()
+            optimizer.step()
+            log_step(rank, epoch, step, step_per_epoch, timer)
+    dist.barrier()
+    CudaProfilerStop()
+
+    if config.graph_name == "products":
+        t2 = Timer()
+        print(f"testing model accuracy on {device}")
+        model.eval()
+        ys = []
+        y_hats = []
+        dataloader.set_target_idx(test_idx)
+        step = 0
+        step_per_epoch = dataloader.max_step_per_epoch
+        
+        for input_nodes, output_nodes, blocks in dataloader:
+            with torch.no_grad():
+                batch_feat = dataloader.get_feature()
+                batch_label = label[output_nodes]
+                ys.append(batch_label)
+                batch_pred = model(blocks, batch_feat)
+                y_hats.append(batch_pred)
+            step+=1
+            log_step(rank, "testing", step, step_per_epoch, timer)
+
+        acc = MF.accuracy(torch.cat(y_hats), torch.cat(ys), task="multiclass", num_classes=config.num_classes)
+        dist.all_reduce(acc, op=dist.ReduceOp.SUM)
+        acc = round(acc.item() * 100 / config.world_size, 2)
+        if rank == 0:
+            print(f"test accuracy={acc}% in {t2.duration()} secs")
+        dist.barrier()
+
+    ddp_exit()

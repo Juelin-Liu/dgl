@@ -1,4 +1,3 @@
-import argparse
 import os
 from utils import get_partition_type, get_args, Config
 
@@ -19,7 +18,11 @@ if __name__ == "__main__":
     sample_mode = args.sample_mode
     partition_type = get_partition_type(nmode, emode, bal)
     world_size = args.world_size
+    model = args.model
+    cache_size = args.cache_size
+    hid_size = args.hid_size
     fanouts = args.fanouts.split(',')
+    
     for idx, fanout in enumerate(fanouts):
         fanouts[idx] = int(fanout)
     dir_path = os.path.dirname(os.path.realpath(__file__))
@@ -32,9 +35,9 @@ if __name__ == "__main__":
                     fanouts=fanouts,
                     batch_size=batch_size,
                     system=system,
-                    model="none",
-                    cache_size="0GB",
-                    hid_size=256,
+                    model=model,
+                    cache_size=cache_size,
+                    hid_size=hid_size,
                     log_path=log_path,
                     data_dir=data_dir,
                     nvlink=False,
@@ -42,8 +45,8 @@ if __name__ == "__main__":
                     sample_mode=sample_mode)
 
     if config.system == "split":
-        from sample.split_sample import split_sample
-        split_sample(config)
+        from nodepred.trainer import bench_split
+        bench_split(config)
     elif config.system == "dgl":
-        from sample.dgl_sample import dgl_sample
-        dgl_sample(config)
+        from nodepred.trainer import bench_dgl_batch
+        bench_dgl_batch([config])

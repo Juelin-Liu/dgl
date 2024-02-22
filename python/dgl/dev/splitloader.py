@@ -61,23 +61,23 @@ class SplitGraphLoader:
     def set_target_idx(self, target_idx):
         target_idx = target_idx.type(self.target_dtype)
         self.local_target_idx = target_idx[self.host_partition_map[target_idx] == self.rank]
-        self.num_step_per_epoch = target_idx.shape[0] // self.config.batch_size
-        self.batch_size = self.local_target_idx.shape[0] // self.num_step_per_epoch
+        self.max_step_per_epoch = target_idx.shape[0] // self.config.batch_size
+        self.batch_size = self.local_target_idx.shape[0] // self.max_step_per_epoch
         self.idx_loader = IdxLoader(d=self.device, target_idx=self.local_target_idx,
                                     batch_size=self.batch_size,
-                                    max_step_per_epoch=self.num_step_per_epoch,
+                                    max_step_per_epoch=self.max_step_per_epoch,
                                     shuffle=True)
         self.iter = iter(self.idx_loader)
         
     def reset(self):
         self.idx_loader = IdxLoader(d=self.device, target_idx=self.local_target_idx,
                                     batch_size=self.batch_size,
-                                    max_step_per_epoch=self.num_step_per_epoch,
+                                    max_step_per_epoch=self.max_step_per_epoch,
                                     shuffle=True)
         self.iter = iter(self.idx_loader)
 
-    def init_dataloader(self, pinned_feat: Tensor, cached_ids: Tensor):
-        InitFeatloader(pinned_feat, cached_ids)
+    def init_featloader(self, pinned_feat: Tensor, cached_ids: Tensor):
+        InitFeatloader(pinned_feat, cached_ids.to(self.device))
         self.featloader_inited = True
     
     def get_feature(self):

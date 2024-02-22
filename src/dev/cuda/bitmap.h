@@ -35,7 +35,6 @@ class DeviceBitmap {
   bool _offset_built{false};
 
  public:
-  DeviceBitmap() = default;
   DeviceBitmap(int64_t num_elems, DGLContext ctx, int _comp_ratio = 8);
   ~DeviceBitmap();
   /**

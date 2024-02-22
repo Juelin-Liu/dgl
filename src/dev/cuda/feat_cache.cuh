@@ -15,7 +15,7 @@ namespace dgl::dev
     NDArray _cached_feat;
     NDArray _pinned_feat;
     NDArray _label;
-    DeviceBitmap _cached_bitmap;
+    std::shared_ptr<DeviceBitmap> _cached_bitmap{nullptr};
     bool init{false};
     bool cached{false};
     int64_t next_id{0};

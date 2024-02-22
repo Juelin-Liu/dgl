@@ -18,9 +18,9 @@ void FeatCache::Init(
     CHECK_EQ(cache_ids->ctx, _ctx);
     auto stream = runtime::getCurrentCUDAStream();
     auto device = runtime::DeviceAPI::Get(_ctx);
-    _cached_bitmap = DeviceBitmap(pinned_feat.NumElements(), _ctx, 32);
+    _cached_bitmap = std::make_shared<DeviceBitmap>(pinned_feat.NumElements(), _ctx, 32);
     ATEN_ID_TYPE_SWITCH(cache_ids->dtype, IdType, {
-      _cached_bitmap.flag(cache_ids.Ptr<IdType>(), cache_ids.NumElements());
+      _cached_bitmap->flag(cache_ids.Ptr<IdType>(), cache_ids.NumElements());
     });
     _cached_feat = IndexSelect(_pinned_feat, cache_ids, stream);
     device->StreamSync(_ctx, stream);

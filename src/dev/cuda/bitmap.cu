@@ -378,9 +378,12 @@ DeviceBitmap::DeviceBitmap(int64_t num_elems, DGLContext ctx, int comp_ratio) {
 }
 
 DeviceBitmap::~DeviceBitmap() {
-  CUDA_CALL(cudaEventSynchronize(_event));
-//  CUDA_CALL(cudaEventDestroy(_event));
-//  CUDA_CALL(cudaStreamDestroy(_memset_stream));
+
+  if (_event) {
+    CUDA_CALL(cudaEventSynchronize(_event));
+    CUDA_CALL(cudaEventDestroy(_event));
+  }
+  if (_memset_stream) CUDA_CALL(cudaStreamDestroy(_memset_stream));
 
   auto device = runtime::DeviceAPI::Get(_ctx);
   if (_bitmap) device->FreeWorkspace(_ctx, _bitmap);

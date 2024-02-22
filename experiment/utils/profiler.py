@@ -67,7 +67,7 @@ class Profiler:
         res += "\n"
         return res
 
-def profile_edge_skew(edges_computed: int, profiler:Profiler, rank:int, dist: dist):
+def profile_edge_skew(edges_computed: int, profiler:Profiler, rank:int):
     profiler.edges_computed = sum(edges_computed)/len(edges_computed)
     edges_computed = sum(edges_computed)/len(edges_computed)
     edges_computed_max  = tensor(edges_computed).to(rank)
