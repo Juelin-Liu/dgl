@@ -31,8 +31,14 @@ def SetFanout(fanout: list[int]) -> None:
 def SampleBatch(seeds: Tensor, replace : bool = False) -> int:
     return _CAPI_Split_SampleBatch(to_dgl_nd(seeds), replace)
 
-def UseBitmap(use_bitmap: bool) -> None:
-    return _CAPI_Split_UseBitmap(use_bitmap)
+# def UseBitmap(use_bitmap: bool) -> None:
+#     return _CAPI_Split_UseBitmap(use_bitmap)
+
+def PartitionCSR(indptr: Tensor, indices: Tensor, flag: Tensor) -> (Tensor, Tensor):
+    ret = _CAPI_PartitionCSR(to_dgl_nd(indptr), to_dgl_nd(indices), to_dgl_nd(flag))
+    out_indptr = from_dgl_nd(ret(0))
+    out_indices = from_dgl_nd(ret(1))
+    return (out_indptr, out_indices)
 
 def GetBlockData(batch_id: int, layer: int):
     data = _CAPI_Split_GetBlockData(batch_id, layer)
@@ -46,20 +52,18 @@ def GetBlocks(batch_id: int, reindex: bool = True, layers: int = 3, edge_data: b
     blocks = []
     for layer in range(layers):
         nvtx.range_push("capi get block")
-
         gidx = _CAPI_Split_GetBlock(batch_id, layer, reindex)
-
         nvtx.range_pop()
-        nvtx.range_push("dgl create block")
 
+        nvtx.range_push("dgl create block")
         block = DGLBlock(gidx, (['_N'], ['_N']), ['_E'])
         block.scattered_src = _CAPI_GetBlockScatteredSrc(batch_id, layer)
-
         nvtx.range_pop()
 
         nvtx.range_push("dgl get block data")
         if edge_data:
             block.edata["_ID"] = GetBlockData(batch_id, layer)
         nvtx.range_pop()
+
         blocks.insert(0, block)
     return input_node, output_node, blocks

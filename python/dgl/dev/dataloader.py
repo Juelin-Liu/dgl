@@ -12,7 +12,6 @@ class GraphDataloader:
         assert ("csc" in g.formats()["created"])
         self.device = f"cuda:{config.rank}"
         self.rank = config.rank
-        self.loc_idx_size = target_idx.shape[0] // config.world_size + 1
         self.fanouts = config.fanouts
         self.replace = config.replace
         self.reindex = config.reindex
@@ -34,6 +33,7 @@ class GraphDataloader:
         SetFanout(fanouts)
         
     def set_target_idx(self, target_idx):
+        self.loc_idx_size = target_idx.shape[0] // self.config.world_size + 1
         self.global_target_idx = target_idx
         self.target_idx = target_idx[self.rank * self.loc_idx_size:(self.rank + 1) * self.loc_idx_size].clone().to(
             self.device)

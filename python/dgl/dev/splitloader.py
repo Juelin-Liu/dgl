@@ -1,6 +1,6 @@
 from dgl.backend import to_dgl_nd, from_dgl_nd
 from torch import Tensor
-
+from dgl import graph
 from torch.cuda import nvtx, device_count
 from .. import DGLGraph
 
@@ -11,7 +11,7 @@ _init_api("dgl.dev", __name__)
 
 
 class SplitGraphLoader:
-    def __init__(self, g: DGLGraph, partition_map: Tensor, target_idx: Tensor, config: SampleConfig):
+    def __init__(self, g: DGLGraph, partition_map: Tensor, target_idx: Tensor, ncclUniqueId, config: SampleConfig):
         assert (config.mode in ["uva", "gpu"])
         assert (config.fanouts is not None)
         assert (config.rank < device_count())
@@ -24,18 +24,30 @@ class SplitGraphLoader:
         self.replace = config.replace
         self.reindex = config.reindex
         self.config = config
-        self.partition_map = partition_map.to(self.rank)
-
         if config.mode == "uva":
             self.g = g.pin_memory_()
         elif config.mode == "gpu":
-            self.g = g.to(self.device)
+            flag = partition_map == self.rank
+            indptr, indices, _ = g.adj_tensors("csc")
+            new_indptr, new_indices = PartitionCSR(indptr, indices, flag)
+            
+            if new_indices.shape[0] < 2**31 and indptr.shape[0] < 2**31:
+                new_indptr = new_indptr.to(torch.int32)
+                new_indices = new_indices.to(torch.int32)
+                target_idx = target_idx.to(torch.int32)
+                
+            self.g = graph(("csc", (new_indptr, new_indices, torch.empty(0, dtype=new_indptr.dtype)))).to(self.rank)
 
         indptr, indices, _ = self.g.adj_tensors("csc")
+        self.partition_map = partition_map.to(self.rank)
+        self.target_dtype = target_idx.dtype
+
         SetGraph(indptr, indices)
         SetFanout(config.fanouts)
         SetPartitionMap(config.num_partition, self.partition_map)
         SetRank(config.rank, config.world_size)
+        InitNccl(config.rank, config.world_size, ncclUniqueId)
+
         self.set_target_idx(target_idx)
         
     def set_fanout(self, fanouts):
@@ -43,7 +55,7 @@ class SplitGraphLoader:
         SetFanout(fanouts)
         
     def set_target_idx(self, target_idx):
-        target_idx = target_idx.to(self.rank)
+        target_idx = target_idx.type(self.target_dtype).to(self.rank)
         self.global_target_idx = target_idx
         self.target_idx = target_idx[self.partition_map[target_idx] == self.rank].to(self.rank)
         self.num_step_per_epoch = self.global_target_idx.shape[0] // self.config.batch_size

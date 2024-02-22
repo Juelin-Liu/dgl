@@ -17,9 +17,9 @@ def SetFanout(fanout: list[int]) -> None:
 
 def SampleBatch(seeds: Tensor, replace : bool = False) -> int:
     return _CAPI_SampleBatch(to_dgl_nd(seeds), replace)
-
-def UseBitmap(use_bitmap: bool) -> None:
-    return _CAPI_UseBitmap(use_bitmap)
+#
+# def UseBitmap(use_bitmap: bool) -> None:
+#     return _CAPI_UseBitmap(use_bitmap)
 
 def GetBlockData(batch_id: int, layer: int):
     data = _CAPI_GetBlockData(batch_id, layer)
@@ -33,12 +33,10 @@ def GetBlocks(batch_id: int, reindex: bool = True, layers: int = 3, edge_data: b
     blocks = []
     for layer in range(layers):
         nvtx.range_push("capi get block")
-
         gidx = _CAPI_GetBlock(batch_id, layer, reindex)
-
         nvtx.range_pop()
-        nvtx.range_push("dgl create block")
 
+        nvtx.range_push("dgl create block")
         block = DGLBlock(gidx, (['_N'], ['_N']), ['_E'])
         nvtx.range_pop()
         
@@ -46,5 +44,6 @@ def GetBlocks(batch_id: int, reindex: bool = True, layers: int = 3, edge_data: b
         if edge_data:
             block.edata["_ID"] = GetBlockData(batch_id, layer)
         nvtx.range_pop()
+
         blocks.insert(0, block)
     return input_node, output_node, blocks
