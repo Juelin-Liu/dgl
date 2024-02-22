@@ -1,6 +1,6 @@
 from torch import randperm, device, Tensor
+from torch.cuda.nvtx import range_pop, range_push
 from dataclasses import dataclass
-
 
 @dataclass
 class SampleConfig:
@@ -31,26 +31,32 @@ class SampleConfig:
 
 
 class IdxLoader:
-    def __init__(self, target_idx: Tensor, batch_size: int, shuffle: bool, max_step_per_epoch: int):
-        assert (target_idx.device != device("cpu"))
-        self.nids = target_idx
+    def __init__(self, d: device, target_idx: Tensor, batch_size: int, shuffle: bool, max_step_per_epoch: int):
+        assert (target_idx.device == device("cpu"))
+        assert(max_step_per_epoch * batch_size <= target_idx.shape[0])
+        self.target_idx = target_idx
         self.batch_size = batch_size
         self.shuffle = shuffle
         self.max_step_per_epoch = max_step_per_epoch
         self.cur_step = 0
-        assert(max_step_per_epoch * batch_size <= target_idx.shape[0])
-
+        self.device = d
+        self.nids = target_idx.to(self.device)
+        
     def __iter__(self):
         self.cur_step = 0
         if self.shuffle:
-            idx = randperm(self.nids.shape[0])
-            self.nids = self.nids[idx].clone()
+            range_push("shuffle idx")
+            idx = randperm(self.target_idx.shape[0])
+            self.nids = self.target_idx[idx].to(self.device)
+            range_pop()
         return self
 
     def __next__(self):
         if self.cur_step < self.max_step_per_epoch:
+            range_push("get next seeds")
             seeds = self.nids[self.cur_step * self.batch_size: (self.cur_step + 1) * self.batch_size]
             self.cur_step += 1
+            range_pop()
             return seeds
         else:
             raise StopIteration

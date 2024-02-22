@@ -1,9 +1,10 @@
 
 import torch
 from torch.multiprocessing import spawn
-from utils import *
+import torch.distributed as dist
 from dgl.dev.dataloader import *
-
+from dgl.dev import CudaProfilerStart, CudaProfilerStop
+from utils import *
 
 def dgl_sample(config: Config):
     graph, train_idx, valid_idx, test_idx = load_topo(config, is_pinned=True)
@@ -33,9 +34,9 @@ def _dgl_sample(rank: int, config: Config, graph: dgl.DGLGraph, train_idx: torch
     dataloader = GraphDataloader(g=graph, target_idx=train_idx, config=sample_config)
     step = 0
     step_per_epoch = dataloader.max_step_per_epoch
+    
+    CudaProfilerStart()
     print(f"sampling on device: {device}", flush=True)
-    timer = Timer()
-
     num_edges = 0
     num_input_nodes = 0
     timer = Timer()
@@ -48,4 +49,6 @@ def _dgl_sample(rank: int, config: Config, graph: dgl.DGLGraph, train_idx: torch
 
             log_step(rank, epoch, step, step_per_epoch, timer)
     print(f"{rank=} {num_edges=} {num_input_nodes=} duration={timer.duration(2)} secs")
+    dist.barrier()
+    CudaProfilerStop()
     ddp_exit()
