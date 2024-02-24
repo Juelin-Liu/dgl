@@ -77,7 +77,7 @@ class SplitGraphLoader:
         self.iter = iter(self.idx_loader)
 
     def init_featloader(self, pinned_feat: Tensor, cached_ids: Tensor):
-        InitFeatloader(pinned_feat, cached_ids.to(self.device))
+        InitFeatloader(pinned_feat, cached_ids)
         self.featloader_inited = True
     
     def get_feature(self):

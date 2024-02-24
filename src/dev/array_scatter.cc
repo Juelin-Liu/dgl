@@ -128,7 +128,7 @@ void Scatter(
   auto ctx = array->ctx;
   auto dtype = array->dtype;
   auto device = runtime::DeviceAPI::Get(ctx);
-  auto bitmap = getBitmap(
+  auto bitmap = getStaticBitmap(
       array->_v_num,
       ctx);  // initialize bitmap at the beginning to avoid memset overhead
 

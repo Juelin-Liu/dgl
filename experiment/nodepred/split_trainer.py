@@ -53,10 +53,14 @@ def train_split_ddp(rank: int, config: Config, unique_id,
                                  drop_last=True)
 
     dataloader = SplitGraphLoader(graph, partition_map, train_idx, unique_id, sample_config)
-    dataloader.init_featloader(feat, torch.empty(size=(0,)))
+    
+    ids = torch.arange(0, partition_map.shape[0])
+    local_ids = ids[partition_map == rank].clone()
+    dataloader.init_featloader(feat, local_ids)
     step = 0
     step_per_epoch = dataloader.max_step_per_epoch
-    
+    dist.barrier()
+
     CudaProfilerStart()
     print(f"sampling on device: {device}", flush=True)
     timer = Timer()

@@ -18,16 +18,17 @@ namespace dgl::dev
     std::shared_ptr<DeviceBitmap> _cached_bitmap{nullptr};
     bool init{false};
     bool cached{false};
-    int64_t next_id{0};
+    int64_t _feat_width{-1};
     DGLContext _ctx{};
     cudaEvent_t _event{nullptr};
     cudaStream_t _prefetch_stream{nullptr};
+    void Init(DGLContext ctx, const NDArray& pinned_feat, const NDArray& cache_ids);
 
    public:
-    FeatCache() = default;
+    FeatCache(DGLContext ctx, const NDArray& pinned_feat, const NDArray& cache_ids);
+
     ~FeatCache() = default;
 
-    void Init(DGLContext ctx, const NDArray& pinned_feat, const NDArray& cache_ids);
 
     NDArray Prefetch(const NDArray& input_nodes, cudaEvent_t event_to_wait = nullptr);
 

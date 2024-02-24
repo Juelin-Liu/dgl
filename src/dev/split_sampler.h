@@ -65,7 +65,7 @@ class SplitSampler {
   int64_t _v_num{0};
   int64_t _e_num{0};
   int64_t _next_id{0};
-  int64_t _rank{0};
+  int64_t _rank{-1};
   int64_t _world_size{0};
   int64_t _num_partitions{0};
   int64_t _num_dp{0};  // number of dp layers
@@ -91,8 +91,9 @@ class SplitSampler {
 
   void initFeatCache(const NDArray& pinned_feat, const NDArray& cached_ids) {
     CHECK_EQ(pinned_feat.IsPinned(), true);
-    _featloader = std::make_shared<FeatCache>();
-    _featloader->Init(_ctx, pinned_feat, cached_ids);
+    CHECK_NE(_rank, -1) << "Must set sampler's rank before start sampling";
+
+    _featloader = std::make_shared<FeatCache>(_ctx, pinned_feat, cached_ids);
     _use_featloader = true;
   }
 
@@ -131,6 +132,7 @@ class SplitSampler {
 
   void setRank(int64_t rank, int64_t world_size) {
     _rank = rank;
+    _ctx = {DGLDeviceType::kDGLCUDA, (int32_t ) rank};
     _world_size = world_size;
   }
 
@@ -145,9 +147,9 @@ class SplitSampler {
    * replace: use replace sampling or not
    */
   int64_t sampleOneBatch(const NDArray& seeds, bool replace) {
+    CHECK_NE(_rank, -1) << "Must set sampler's rank before start sampling";
     CHECK(seeds.IsPinned() || seeds->ctx.device_type != DGLDeviceType::kDGLCPU)
         << "Seeds must be pinned or in GPU memory";
-    _ctx = seeds->ctx;
     std::vector<aten::COOMatrix> blocks;
     std::vector<NDArray> frontiers = {seeds};
     std::vector<int64_t > num_srcs;

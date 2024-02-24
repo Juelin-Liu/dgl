@@ -5,7 +5,7 @@
 #include <dgl/runtime/tensordispatch.h>
 
 #include <cub/cub.cuh>
-
+#include <cub/iterator/counting_input_iterator.cuh>
 #include "../../runtime/cuda/cuda_common.h"
 #include "bitmap.h"
 
@@ -44,7 +44,6 @@ constexpr int name = 1;
 using TensorDispatcher = dgl::runtime::TensorDispatcher;
 
 namespace dgl::dev {
-
 class DeviceBitIterator
     : public std::iterator<std::random_access_iterator_tag, bool> {
  private:
@@ -187,6 +186,7 @@ class DeviceBitIterator
 };
 
 namespace impl {
+
 template <typename IdType>
 __global__ void flag_kernel(
     DeviceBitIterator iter, const IdType *row, int64_t num_rows) {
@@ -197,13 +197,32 @@ __global__ void flag_kernel(
 }
 
 template <typename IdType>
-__global__ void unflag_kernel(
-    DeviceBitIterator iter, const IdType *row, int64_t num_rows) {
+__global__ void mask_flag_kernel(DeviceBitIterator flag,
+                                 DeviceBitIterator hit,
+                                 DeviceBitIterator miss,
+                                 DeviceBitIterator all,
+                                 const IdType *row, int64_t num_rows){
   const int64_t tIdx = threadIdx.x + blockIdx.x * blockDim.x;
   if (tIdx < num_rows) {
-    iter.unflag(row[tIdx]);
+    const auto id = row[tIdx];
+    all.flag(id);
+    if (flag[id]) {
+      hit.flag(id);
+    } else {
+      miss.flag(id);
+    }
   }
-}
+};
+
+//
+//template <typename IdType>
+//__global__ void unflag_kernel(
+//    DeviceBitIterator iter, const IdType *row, int64_t num_rows) {
+//  const int64_t tIdx = threadIdx.x + blockIdx.x * blockDim.x;
+//  if (tIdx < num_rows) {
+//    iter.unflag(row[tIdx]);
+//  }
+//}
 
 // This kernel is used to initialize the offset array.
 // The n-th element in the offset array stores the number of 1-bit
@@ -278,38 +297,38 @@ __global__ void map_kernel(
   }
 }
 
-template <typename IdType, int CompRatio>
-__global__ void map_uncheck_kernel(
-    DeviceBitIterator iter, const uint32_t advance, const OffsetType *offset,
-    const IdType *row, int64_t num_rows, IdType *out_row) {
-  assert(blockDim.x == BlockSize && CompRatio <= 32);
-  const int64_t tIdx = threadIdx.x + blockIdx.x * blockDim.x;
-  const int32_t rIdx = tIdx / CompRatio;
-  const int32_t tOffset = tIdx % CompRatio;
-  typedef cub::WarpReduce<int, CompRatio> WarpReduce;
-  __shared__
-      typename WarpReduce::TempStorage temp_storage[BlockSize / CompRatio];
-
-  if (rIdx < num_rows) {
-    const IdType id = row[rIdx];
-    if (iter[id]) {
-      const int32_t bucket_idx = (id / (BucketWidth * CompRatio)) * CompRatio;
-      const int32_t total_num_bits = id % (BucketWidth * CompRatio); // excluding the [id]-th bit
-
-      int32_t num_bits = std::max(
-          0, std::min(BucketWidth, total_num_bits - tOffset * BucketWidth));
-      ;
-
-      const int bitcnt = iter.popcnt(bucket_idx + tOffset, num_bits);
-      const int group_id = threadIdx.x / CompRatio;
-      const int agg_bitcnt = WarpReduce(temp_storage[group_id]).Sum(bitcnt);
-      if (tOffset == 0) {
-        const int32_t offset_idx = id / (BucketWidth * CompRatio);
-        out_row[rIdx] = offset[offset_idx] + agg_bitcnt + advance;
-      }
-    }
-  }
-}
+//template <typename IdType, int CompRatio>
+//__global__ void map_uncheck_kernel(
+//    DeviceBitIterator iter, const uint32_t advance, const OffsetType *offset,
+//    const IdType *row, int64_t num_rows, IdType *out_row) {
+//  assert(blockDim.x == BlockSize && CompRatio <= 32);
+//  const int64_t tIdx = threadIdx.x + blockIdx.x * blockDim.x;
+//  const int32_t rIdx = tIdx / CompRatio;
+//  const int32_t tOffset = tIdx % CompRatio;
+//  typedef cub::WarpReduce<int, CompRatio> WarpReduce;
+//  __shared__
+//      typename WarpReduce::TempStorage temp_storage[BlockSize / CompRatio];
+//
+//  if (rIdx < num_rows) {
+//    const IdType id = row[rIdx];
+//    if (iter[id]) {
+//      const int32_t bucket_idx = (id / (BucketWidth * CompRatio)) * CompRatio;
+//      const int32_t total_num_bits = id % (BucketWidth * CompRatio); // excluding the [id]-th bit
+//
+//      int32_t num_bits = std::max(
+//          0, std::min(BucketWidth, total_num_bits - tOffset * BucketWidth));
+//      ;
+//
+//      const int bitcnt = iter.popcnt(bucket_idx + tOffset, num_bits);
+//      const int group_id = threadIdx.x / CompRatio;
+//      const int agg_bitcnt = WarpReduce(temp_storage[group_id]).Sum(bitcnt);
+//      if (tOffset == 0) {
+//        const int32_t offset_idx = id / (BucketWidth * CompRatio);
+//        out_row[rIdx] = offset[offset_idx] + agg_bitcnt + advance;
+//      }
+//    }
+//  }
+//}
 
 __global__ void read_kernel(DeviceBitIterator iter, int64_t num_items) {
   const int64_t tIdx = threadIdx.x + blockIdx.x * blockDim.x;
@@ -355,6 +374,7 @@ __global__ void unique_kernel(
 
 DeviceBitmap::DeviceBitmap(int64_t num_elems, DGLContext ctx, int comp_ratio) {
   _comp_ratio = comp_ratio;
+  _num_elems = num_elems;
   _num_buckets =
       (num_elems + BucketWidth - 1) / BucketWidth;  // 32 bits per buckets
   _num_buckets = _num_buckets + _comp_ratio -
@@ -373,12 +393,10 @@ DeviceBitmap::DeviceBitmap(int64_t num_elems, DGLContext ctx, int comp_ratio) {
   _offset = static_cast<OffsetType *>(device->AllocWorkspace(_ctx, _num_offset * sizeof(OffsetType)));
   _temp_storage_bytes = 1024 * 1024;
   _d_temp_storage = device->AllocWorkspace(_ctx, _temp_storage_bytes);
-  _num_advance = 0;
-  LOG(INFO) << "bitmap: " << num_elems << " on " << _ctx;
+  LOG(INFO) << "bitmap: " << num_elems << " comp_ratio " << _comp_ratio << " on " << _ctx;
 }
 
 DeviceBitmap::~DeviceBitmap() {
-
   if (_event) {
     CUDA_CALL(cudaEventSynchronize(_event));
     CUDA_CALL(cudaEventDestroy(_event));
@@ -389,6 +407,25 @@ DeviceBitmap::~DeviceBitmap() {
   if (_bitmap) device->FreeWorkspace(_ctx, _bitmap);
   if (_offset) device->FreeWorkspace(_ctx, _offset);
   if (_d_temp_storage) device->FreeWorkspace(_ctx, _d_temp_storage);
+}
+
+inline size_t Round(size_t num_bytes, size_t round) {
+  size_t num_chunk = (num_bytes + round - 1) / round;
+  return num_chunk * round;
+}
+
+void* DeviceBitmap::get_temp_storage(size_t temp_storage_bytes) {
+  auto device = runtime::DeviceAPI::Get(_ctx);
+  if (_d_temp_storage == nullptr) {
+    _d_temp_storage = device->AllocWorkspace(_ctx, temp_storage_bytes);
+    _temp_storage_bytes = Round(temp_storage_bytes, 1024 * 1024);
+  } else if (temp_storage_bytes > _temp_storage_bytes) {
+    CUDA_CALL(cudaEventSynchronize(_event));
+    device->FreeWorkspace(_ctx, _d_temp_storage);
+    _temp_storage_bytes = Round(temp_storage_bytes, 1024 * 1024);
+    _d_temp_storage = device->AllocWorkspace(_ctx, _temp_storage_bytes);
+  };
+  return _d_temp_storage;
 }
 
 void DeviceBitmap::reset() {
@@ -420,20 +457,20 @@ void DeviceBitmap::flag(const IdType *row, int64_t num_rows) {
   CUDA_CALL(cudaEventRecord(_event, stream));
 }
 
-template <typename IdType>
-void DeviceBitmap::unflag(const IdType *row, int64_t num_rows) {
-  auto stream = runtime::getCurrentCUDAStream();
-  auto device = runtime::DeviceAPI::Get(_ctx);
-  CUDA_CALL(cudaStreamWaitEvent(
-      stream, _event));  // any further cuda call on runtime stream must wait until memset is completed
-  const dim3 block(BlockSize);
-  const dim3 grid((num_rows + block.x - 1) / block.x);
-  DeviceBitIterator iter(_bitmap, _num_buckets, 0);
-  CUDA_KERNEL_CALL(
-      impl::unflag_kernel, grid, block, 0, stream, iter, row, num_rows);
-  _offset_built = false;
-  CUDA_CALL(cudaEventRecord(_event, stream));
-}
+//template <typename IdType>
+//void DeviceBitmap::unflag(const IdType *row, int64_t num_rows) {
+//  auto stream = runtime::getCurrentCUDAStream();
+//  auto device = runtime::DeviceAPI::Get(_ctx);
+//  CUDA_CALL(cudaStreamWaitEvent(
+//      stream, _event));  // any further cuda call on runtime stream must wait until memset is completed
+//  const dim3 block(BlockSize);
+//  const dim3 grid((num_rows + block.x - 1) / block.x);
+//  DeviceBitIterator iter(_bitmap, _num_buckets, 0);
+//  CUDA_KERNEL_CALL(
+//      impl::unflag_kernel, grid, block, 0, stream, iter, row, num_rows);
+//  _offset_built = false;
+//  CUDA_CALL(cudaEventRecord(_event, stream));
+//}
 
 void DeviceBitmap::sync() { CUDA_CALL(cudaEventSynchronize(_event)); }
 
@@ -462,18 +499,8 @@ void DeviceBitmap::buildOffset() {
   CUDA_CALL(cub::DeviceScan::ExclusiveSum(
       nullptr, temp_storage_bytes, d_in, d_out, num_items, stream));
 
-  if (_d_temp_storage == nullptr) {
-    _d_temp_storage = device->AllocWorkspace(_ctx, temp_storage_bytes);
-    _temp_storage_bytes = temp_storage_bytes;
-  } else if (temp_storage_bytes > _temp_storage_bytes) {
-    CUDA_CALL(cudaEventSynchronize(_event));
-    device->FreeWorkspace(_ctx, _d_temp_storage);
-    _d_temp_storage = device->AllocWorkspace(_ctx, temp_storage_bytes);
-    _temp_storage_bytes = temp_storage_bytes;
-  };
-
   CUDA_CALL(cub::DeviceScan::ExclusiveSum(
-      _d_temp_storage, temp_storage_bytes, d_in, d_out, num_items, stream));
+      get_temp_storage(temp_storage_bytes), temp_storage_bytes, d_in, d_out, num_items, stream));
 
   CUDA_CALL(cudaEventRecord(_event, stream));
 
@@ -489,7 +516,7 @@ int64_t DeviceBitmap::numItem() const {
   const dim3 block(BlockSize);
   const dim3 grid((_num_buckets + block.x - 1) / block.x);
   DeviceBitIterator iter(_bitmap, _num_buckets, 0);
-  auto *d_num_item =
+  auto d_num_item =
       static_cast<uint32_t *>(device->AllocWorkspace(_ctx, sizeof(uint32_t)));
   uint32_t h_num_item{0};
   CUDA_CALL(cudaMemsetAsync(d_num_item, 0, sizeof(uint32_t), stream));
@@ -556,30 +583,198 @@ void DeviceBitmap::map(const IdType *row, int64_t num_rows, IdType *out_row) {
   CUDA_CALL(cudaEventRecord(_event, stream));
 };
 
-template <typename IdType>
-void DeviceBitmap::map_uncheck(const IdType *row, int64_t num_rows, IdType *out_row) {
-  buildOffset();
+template<typename IdType>
+struct IdIsCached
+{
+  DeviceBitIterator _cached;
+  CUB_RUNTIME_FUNCTION __forceinline__ explicit IdIsCached(DeviceBitIterator cached): _cached(cached) {};
+
+  __device__ __forceinline__ bool operator()(const IdType &id) const {
+    return _cached[id];
+  }
+};
+
+template<typename IdType>
+struct IdIsNotCached
+{
+  DeviceBitIterator _cached;
+  CUB_RUNTIME_FUNCTION __forceinline__ explicit IdIsNotCached(DeviceBitIterator cached): _cached(cached) {};
+
+  __device__ __forceinline__ bool operator()(const IdType &id) const {
+    return !_cached[id];
+  }
+};
+
+
+template<typename IdType, typename IdxType>
+struct IdxIsCached
+{
+  DeviceBitIterator _cached;
+  const IdType * _row;
+  CUB_RUNTIME_FUNCTION __forceinline__ IdxIsCached(DeviceBitIterator cached, const IdType* row): _cached(cached), _row{row} {};
+
+  __device__ __forceinline__ bool operator()(const IdxType &idx) const {
+    return _cached[_row[idx]];
+  }
+};
+
+template<typename IdType, typename IdxType>
+struct IdxIsNotCached
+{
+  DeviceBitIterator _cached;
+  const IdType * _row;
+  CUB_RUNTIME_FUNCTION __forceinline__ IdxIsNotCached(DeviceBitIterator cached, const IdType* row): _cached(cached), _row{row} {};
+
+  __device__ __forceinline__ bool operator()(const IdxType &idx) const {
+    return !_cached[_row[idx]];
+  }
+};
+
+template<typename IdType>
+QueryIdx DeviceBitmap::queryBitmap(const IdType *row, int64_t num_rows) {
   auto device = runtime::DeviceAPI::Get(_ctx);
   auto stream = runtime::getCurrentCUDAStream();
-    CUDA_CALL(cudaStreamWaitEvent(stream, _event));
 
   const dim3 block(BlockSize);
-  const dim3 grid((num_rows * _comp_ratio + block.x - 1) / block.x);
-  DeviceBitIterator iter(_bitmap, _num_buckets, 0);
-  ATEN_COMP_RATIO_SWITCH(_comp_ratio, COMP_RATIO, {
-    CUDA_KERNEL_CALL(
-        (impl::map_uncheck_kernel<IdType, COMP_RATIO>), grid, block, 0, stream, iter,
-        _num_advance, _offset, row, num_rows, out_row);
-  });
-  //  device->StreamSync(_ctx, stream);
-  CUDA_CALL(cudaEventRecord(_event, stream));
+  const dim3 grid((num_rows + block.x - 1) / block.x);
+
+  using IdxType = int32_t;
+  DeviceBitIterator iter = {_bitmap, _num_buckets, 0};
+  NDArray hitId = NDArray::Empty({num_rows}, DGLDataTypeTraits<IdxType >::dtype, _ctx);
+  NDArray hitReadIdx = NDArray::Empty({num_rows}, DGLDataTypeTraits<IdxType >::dtype, _ctx);
+  NDArray hitWriteIdx = NDArray::Empty({num_rows}, DGLDataTypeTraits<IdxType >::dtype, _ctx);
+
+  NDArray missId = NDArray::Empty({num_rows}, DGLDataTypeTraits<IdxType >::dtype, _ctx);
+  NDArray missWriteIdx = NDArray::Empty({num_rows}, DGLDataTypeTraits<IdxType >::dtype, _ctx);
+
+  static auto d_num_cached = static_cast<IdxType *>(device->AllocWorkspace(_ctx, sizeof(IdxType)));
+  static auto d_num_not_cached = static_cast<IdxType *>(device->AllocWorkspace(_ctx, sizeof(IdxType)));
+
+  NDArray h_num_cached_tensor;
+  NDArray h_num_not_cached_tensor;
+  if (TensorDispatcher::Global()->IsAvailable()) {
+    h_num_cached_tensor = NDArray::PinnedEmpty(
+        {1}, DGLDataTypeTraits<IdxType>::dtype, DGLContext{kDGLCPU, 0});
+    h_num_not_cached_tensor = NDArray::PinnedEmpty(
+        {1}, DGLDataTypeTraits<IdxType>::dtype, DGLContext{kDGLCPU, 0});
+  } else {
+    // use pageable memory, it will unecessarily block but be functional
+    h_num_cached_tensor = NDArray::Empty(
+        {1}, DGLDataTypeTraits<IdxType>::dtype, DGLContext{kDGLCPU, 0});
+    h_num_not_cached_tensor = NDArray::Empty(
+        {1}, DGLDataTypeTraits<IdxType>::dtype, DGLContext{kDGLCPU, 0});
+  }
+
+  size_t temp_storage_bytes{0};
+
+  // fill missId a.k.a missReadIdx
+  CUDA_CALL(cub::DeviceSelect::If(nullptr, temp_storage_bytes,
+                                  row, missId.Ptr<IdxType>(),
+                                  d_num_not_cached, num_rows,
+                                  IdIsNotCached<IdType>(iter), stream));
+
+  CUDA_CALL(cub::DeviceSelect::If(get_temp_storage(temp_storage_bytes), temp_storage_bytes,
+                                  row, missId.Ptr<IdxType>(),
+                                  d_num_not_cached, num_rows,
+                                  IdIsNotCached<IdType>(iter), stream));
+
+  CUDA_CALL(cudaMemcpyAsync(h_num_not_cached_tensor.Ptr<IdxType>(),
+                            d_num_not_cached, sizeof(IdxType ), cudaMemcpyDeviceToHost, stream));
+
+  CUDA_CALL(cudaEventRecord(_event, stream)); // record event to prevent get_temp_storage free the buffer too early
+
+  // fill hitWriteIdx
+  CUDA_CALL(cub::DeviceSelect::If(nullptr, temp_storage_bytes,
+                                  cub::CountingInputIterator{(IdxType )0}, hitWriteIdx.Ptr<IdxType>(),
+                                  d_num_cached, num_rows,
+                                  IdxIsCached<IdType, IdxType>(iter, row), stream));
+
+  CUDA_CALL(cub::DeviceSelect::If(get_temp_storage(temp_storage_bytes), temp_storage_bytes,
+                                  cub::CountingInputIterator{(IdxType )0}, hitWriteIdx.Ptr<IdxType>(),
+                                  d_num_cached, num_rows,
+                                  IdxIsCached<IdType, IdxType>(iter, row), stream));
+
+  CUDA_CALL(cudaMemcpyAsync(h_num_cached_tensor.Ptr<IdxType>(),
+                            d_num_cached, sizeof(IdxType ), cudaMemcpyDeviceToHost, stream));
+
+  CUDA_CALL(cudaEventRecord(_event, stream)); // record event to overlap the copy of num hit and num miss
+
+  // fill missWriteIdx
+  CUDA_CALL(cub::DeviceSelect::If(nullptr, temp_storage_bytes,
+                                  cub::CountingInputIterator{(IdxType )0}, missWriteIdx.Ptr<IdxType>(),
+                                  d_num_not_cached, num_rows,
+                                  IdxIsNotCached<IdType, IdxType>(iter, row), stream));
+
+  CUDA_CALL(cub::DeviceSelect::If(get_temp_storage(temp_storage_bytes), temp_storage_bytes,
+                                  cub::CountingInputIterator{(IdxType )0}, missWriteIdx.Ptr<IdxType>(),
+                                  d_num_not_cached, num_rows,
+                                  IdxIsNotCached<IdType, IdxType>(iter, row), stream));
+
+
+  // obtain hit id
+  CUDA_CALL(cub::DeviceSelect::If(nullptr, temp_storage_bytes,
+                                  row, hitId.Ptr<IdxType>(),
+                                  d_num_cached, num_rows,
+                                  IdIsCached<IdType>(iter), stream));
+
+  CUDA_CALL(cub::DeviceSelect::If(get_temp_storage(temp_storage_bytes), temp_storage_bytes,
+                                  row, hitId.Ptr<IdxType>(),
+                                  d_num_not_cached, num_rows,
+                                  IdIsCached<IdType>(iter), stream));
+
+  CUDA_CALL(cudaEventSynchronize(_event));
+  const IdxType num_hit = h_num_cached_tensor.Ptr<IdxType >()[0];
+  const IdxType num_miss = h_num_not_cached_tensor.Ptr<IdxType >()[0];
+  CHECK_EQ((num_hit + num_miss), num_rows);
+
+  this->map(hitId.Ptr<IdxType>(), num_hit, hitReadIdx.Ptr<IdxType>());
+
+  QueryIdx ret;
+  ret._hitReadIdx = hitReadIdx.CreateView({num_hit}, hitReadIdx->dtype, 0);
+  ret._hitWriteIdx = hitWriteIdx.CreateView({num_hit}, hitWriteIdx->dtype, 0);
+  ret._missReadId = missId.CreateView({num_miss}, missId->dtype, 0);
+  ret._missWriteIdx = missWriteIdx.CreateView({num_miss}, missWriteIdx->dtype, 0);
+//  device->StreamSync(_ctx, stream);
+//  if (_ctx.device_id == 0) {
+//    LOG(INFO) << "num_hit: " << num_hit << " num_miss: " << num_miss << " num_rows: " << num_rows;
+//    LOG(INFO) << "hit id " << hitId;
+//    LOG(INFO) << "input id " << NDArray::CreateFromRaw({num_rows}, DGLDataTypeTraits<IdType>::dtype, _ctx, (void*)row, false);
+//    LOG(INFO) << "hit read idx " << ret._hitReadIdx;
+//    LOG(INFO) << "hit write idx " << ret._hitWriteIdx;
+//    LOG(INFO) << "miss read id " << ret._missReadId;
+//    LOG(INFO) << "miss write idx " << ret._missWriteIdx;
+//  }
+
+  return ret;
 };
+
+//template <typename IdType>
+//void DeviceBitmap::map_uncheck(const IdType *row, int64_t num_rows, IdType *out_row) {
+//  buildOffset();
+//  auto device = runtime::DeviceAPI::Get(_ctx);
+//  auto stream = runtime::getCurrentCUDAStream();
+//    CUDA_CALL(cudaStreamWaitEvent(stream, _event));
+//
+//  const dim3 block(BlockSize);
+//  const dim3 grid((num_rows * _comp_ratio + block.x - 1) / block.x);
+//  DeviceBitIterator iter(_bitmap, _num_buckets, 0);
+//  ATEN_COMP_RATIO_SWITCH(_comp_ratio, COMP_RATIO, {
+//    CUDA_KERNEL_CALL(
+//        (impl::map_uncheck_kernel<IdType, COMP_RATIO>), grid, block, 0, stream, iter,
+//        _num_advance, _offset, row, num_rows, out_row);
+//  });
+//  //  device->StreamSync(_ctx, stream);
+//  CUDA_CALL(cudaEventRecord(_event, stream));
+//};
 
 template void DeviceBitmap::flag<int32_t>(const int32_t *, int64_t);
 template void DeviceBitmap::flag<int64_t>(const int64_t *, int64_t);
 
-template void DeviceBitmap::unflag<int32_t>(const int32_t *, int64_t);
-template void DeviceBitmap::unflag<int64_t>(const int64_t *, int64_t);
+template QueryIdx DeviceBitmap::queryBitmap<int32_t>(const int32_t *, int64_t);
+template QueryIdx DeviceBitmap::queryBitmap<int64_t>(const int64_t *, int64_t);
+
+//template void DeviceBitmap::unflag<int32_t>(const int32_t *, int64_t);
+//template void DeviceBitmap::unflag<int64_t>(const int64_t *, int64_t);
 
 template int64_t DeviceBitmap::unique<int32_t>(int32_t *);
 template int64_t DeviceBitmap::unique<int64_t>(int64_t *);
@@ -587,6 +782,8 @@ template int64_t DeviceBitmap::unique<int64_t>(int64_t *);
 template void DeviceBitmap::map<int32_t>(const int32_t *, int64_t, int32_t *);
 template void DeviceBitmap::map<int64_t>(const int64_t *, int64_t, int64_t *);
 
-template void DeviceBitmap::map_uncheck<int32_t>(const int32_t *, int64_t, int32_t *);
-template void DeviceBitmap::map_uncheck<int64_t>(const int64_t *, int64_t, int64_t *);
+//template void DeviceBitmap::map_uncheck<int32_t>(const int32_t *, int64_t, int32_t *);
+//template void DeviceBitmap::map_uncheck<int64_t>(const int64_t *, int64_t, int64_t *);
+
+
 }  // namespace dgl::dev
