@@ -156,7 +156,7 @@ class SplitSampler {
     std::vector<int64_t > num_dsts;
 
     std::vector<ScatteredArray> scattered_arrays;
-    for (size_t layer = 0; layer < _fanouts.size(); layer++) {
+    for (int64_t layer = 0; layer < (int64_t)_fanouts.size(); layer++) {
       int64_t fanout = _fanouts.at(layer);
       auto frontier = frontiers.at(layer);
       // assume seeds are all local nodes
@@ -192,12 +192,12 @@ class SplitSampler {
         batch_id, _num_dp, num_srcs, num_dsts, frontiers, blocks, scattered_arrays);
 
     if (_use_featloader) {
-      static cudaEvent_t sampling_event{nullptr};
-      if (sampling_event == nullptr) {
-        CUDA_CALL(cudaEventCreate(&sampling_event));
-      }
-      CUDA_CALL(cudaEventRecord(sampling_event, runtime::getCurrentCUDAStream()));
-      _batch->_feat = _featloader->Prefetch(_batch->_frontiers.at(frontiers.size()-1), sampling_event);
+      // static cudaEvent_t sampling_event{nullptr};
+      // if (sampling_event == nullptr) {
+      //   CUDA_CALL(cudaEventCreate(&sampling_event));
+      // }
+      // CUDA_CALL(cudaEventRecord(sampling_event, runtime::getCurrentCUDAStream()));
+      _batch->_feat = _featloader->Prefetch(_batch->_frontiers.at(frontiers.size()-1), nullptr);
     }
 
     return batch_id;
@@ -254,6 +254,7 @@ class SplitSampler {
   NDArray getFeature(int64_t batch_id) {
     std::shared_ptr<SplitBatch> batch{_batch};
     CHECK_EQ(batch->_batch_id, batch_id);
+    CHECK_NE(_featloader, nullptr);
     _featloader->Sync();
     return batch->_feat;
   }

@@ -393,7 +393,7 @@ DeviceBitmap::DeviceBitmap(int64_t num_elems, DGLContext ctx, int comp_ratio) {
   _offset = static_cast<OffsetType *>(device->AllocWorkspace(_ctx, _num_offset * sizeof(OffsetType)));
   _temp_storage_bytes = 1024 * 1024;
   _d_temp_storage = device->AllocWorkspace(_ctx, _temp_storage_bytes);
-  LOG(INFO) << "bitmap: " << num_elems << " comp_ratio " << _comp_ratio << " on " << _ctx;
+  // LOG(INFO) << "bitmap: " << num_elems << " comp_ratio " << _comp_ratio << " on " << _ctx;
 }
 
 DeviceBitmap::~DeviceBitmap() {

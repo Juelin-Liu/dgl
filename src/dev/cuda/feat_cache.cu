@@ -18,7 +18,7 @@ void FeatCache::Init(
   _pinned_feat = pinned_feat;
   _ctx = ctx;
   _feat_width = _pinned_feat.NumElements() / _pinned_feat->shape[0];
-  CUDA_CALL(cudaEventCreate(&_event));
+  CUDA_CALL(cudaEventCreateWithFlags(&_event, cudaEventDisableTiming));
   CUDA_CALL(cudaStreamCreateWithFlags(&_prefetch_stream, cudaStreamNonBlocking));
   // copying features of cached ids to gpu
   if (cache_ids.NumElements() > 0) {
@@ -46,21 +46,22 @@ NDArray FeatCache::Prefetch(const dgl::runtime::NDArray &input_nodes, cudaEvent_
 
   NDArray ret;
   if (cached) {
-    QueryIdx idx;
     ATEN_ID_TYPE_SWITCH(input_nodes->dtype, IdType, {
-      idx = _cached_bitmap->queryBitmap(input_nodes.Ptr<IdType>(), input_nodes.NumElements());
+      _idx = _cached_bitmap->queryBitmap(input_nodes.Ptr<IdType>(), input_nodes.NumElements());
     });
     CUDA_CALL(cudaEventRecord(_event, runtime::getCurrentCUDAStream())); // must wait until all events have finished in queryBitmap
     CUDA_CALL(cudaStreamWaitEvent(_prefetch_stream, _event));
     ret = NDArray::Empty({input_nodes->shape[0], _feat_width}, _pinned_feat->dtype, _ctx);
-    IndexSelect(_pinned_feat, idx._missReadId, idx._missWriteIdx, ret, _prefetch_stream);
-    IndexSelect(_cached_feat, idx._hitReadIdx, idx._hitWriteIdx, ret, _prefetch_stream);
+    IndexSelect(_cached_feat, _idx._hitReadIdx, _idx._hitWriteIdx, ret, _prefetch_stream);
+    IndexSelect(_pinned_feat, _idx._missReadId, _idx._missWriteIdx, ret, _prefetch_stream);
+    CUDA_CALL(cudaEventRecord(_event, _prefetch_stream));
   } else {
+    _input_nodes = input_nodes;
     CUDA_CALL(cudaEventRecord(_event, runtime::getCurrentCUDAStream())); // must wait until all events have finished in queryBitmap
     CUDA_CALL(cudaStreamWaitEvent(_prefetch_stream, _event));
-    ret = IndexSelect(_pinned_feat, input_nodes, _prefetch_stream);
+    ret = IndexSelect(_pinned_feat, _input_nodes, _prefetch_stream);
+    CUDA_CALL(cudaEventRecord(_event, _prefetch_stream));
   }
-  CUDA_CALL(cudaEventRecord(_event, _prefetch_stream));
   return ret;
 }
 
