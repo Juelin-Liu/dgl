@@ -73,10 +73,7 @@ def profile_edge_skew(edges_computed: int, profiler:Profiler, rank:int):
     edges_computed_max  = tensor(edges_computed).to(rank)
     edges_computed_min  = tensor(edges_computed).to(rank)
     edges_computed_avg  = tensor(edges_computed).to(rank)
-    dist.all_reduce(edges_computed_max, op = dist.ReduceOp.MAX)
-    dist.all_reduce(edges_computed_min, op = dist.ReduceOp.MIN)
-    dist.all_reduce(edges_computed_avg, op = dist.ReduceOp.SUM)
-    
+
     profiler.edges_computed_min = edges_computed_min.item()
     profiler.edges_computed_max = edges_computed_max.item()
     profiler.edges_computed = edges_computed_avg.item() / 4

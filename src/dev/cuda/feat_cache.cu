@@ -50,7 +50,7 @@ NDArray FeatCache::Prefetch(const dgl::runtime::NDArray &input_nodes, cudaEvent_
       _idx = _cached_bitmap->queryBitmap(input_nodes.Ptr<IdType>(), input_nodes.NumElements());
     });
     CUDA_CALL(cudaEventRecord(_event, runtime::getCurrentCUDAStream())); // must wait until all events have finished in queryBitmap
-    CUDA_CALL(cudaStreamWaitEvent(_prefetch_stream, _event));
+    //CUDA_CALL(cudaStreamWaitEvent(_prefetch_stream, _event));
     ret = NDArray::Empty({input_nodes->shape[0], _feat_width}, _pinned_feat->dtype, _ctx);
     IndexSelect(_cached_feat, _idx._hitReadIdx, _idx._hitWriteIdx, ret, _prefetch_stream);
     IndexSelect(_pinned_feat, _idx._missReadId, _idx._missWriteIdx, ret, _prefetch_stream);

@@ -174,20 +174,20 @@ class Profiler:
         res += "\n"
         return res
 
-def profile_edge_skew(edges_computed: int, profiler:Profiler, rank:int, dist: any):
-    profiler.edges_computed = sum(edges_computed)/len(edges_computed)
-    edges_computed = sum(edges_computed)/len(edges_computed)
-    edges_computed_max  = torch.tensor(edges_computed).to(rank)
-    edges_computed_min  = torch.tensor(edges_computed).to(rank)
-    edges_computed_avg  = torch.tensor(edges_computed).to(rank)
-    dist.all_reduce(edges_computed_max, op = dist.ReduceOp.MAX)
-    dist.all_reduce(edges_computed_min, op = dist.ReduceOp.MIN)
-    dist.all_reduce(edges_computed_avg, op = dist.ReduceOp.SUM)
-    
-    profiler.edges_computed_min = edges_computed_min.item()
-    profiler.edges_computed_max = edges_computed_max.item()
-    profiler.edges_computed = edges_computed_avg.item() / 4
-    profiler.edge_skew = (edges_computed_max.item() - edges_computed_min.item()) / profiler.edges_computed
+# def profile_edge_skew(edges_computed: int, profiler:Profiler, rank:int, dist: any):
+#     profiler.edges_computed = sum(edges_computed)/len(edges_computed)
+#     edges_computed = sum(edges_computed)/len(edges_computed)
+#     edges_computed_max  = torch.tensor(edges_computed).to(rank)
+#     edges_computed_min  = torch.tensor(edges_computed).to(rank)
+#     edges_computed_avg  = torch.tensor(edges_computed).to(rank)
+#     dist.all_reduce(edges_computed_max, op = dist.ReduceOp.MAX)
+#     dist.all_reduce(edges_computed_min, op = dist.ReduceOp.MIN)
+#     dist.all_reduce(edges_computed_avg, op = dist.ReduceOp.SUM)
+#
+#     profiler.edges_computed_min = edges_computed_min.item()
+#     profiler.edges_computed_max = edges_computed_max.item()
+#     profiler.edges_computed = edges_computed_avg.item() / 4
+#     profiler.edge_skew = (edges_computed_max.item() - edges_computed_min.item()) / profiler.edges_computed
 
 def get_default_config(graph_name, system, log_path, data_dir, num_redundant_layer = 0):
     configs = []
@@ -236,7 +236,7 @@ def write_to_csv(out_path, configs: list[Config], profilers: list[Profiler]):
         for k, v in zip(header, content):
             res[k] = v
         return res
-    
+    print("Try to write")
     has_header = os.path.isfile(out_path)
     with open(out_path, 'a') as f:
         header = configs[0].header() + profilers[0].header()

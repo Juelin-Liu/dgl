@@ -55,7 +55,17 @@ def train_split_ddp(rank: int, config: Config, unique_id,
     dataloader = SplitGraphLoader(graph, partition_map, train_idx, unique_id, sample_config)
     
     ids = torch.arange(0, partition_map.shape[0])
-    local_ids = ids[partition_map == rank].clone()
+    local_ids = ids[partition_map == rank]
+
+    if "G" in config.cache_size:
+        size = int(config.cache_size.removesuffix("G")) * (1024 ** 3)
+        num_ids_cached = min(size // (feat.shape[1] * 4), local_ids.shape[0])
+        local_ids = local_ids[:num_ids_cached]
+        print(f"nodes cached {num_ids_cached}")
+    else:
+        assert(config.cache_size == "0MB")
+
+    local_ids = local_ids.clone()
     dataloader.init_featloader(feat, local_ids)
     step = 0
     step_per_epoch = dataloader.max_step_per_epoch
@@ -64,21 +74,50 @@ def train_split_ddp(rank: int, config: Config, unique_id,
     CudaProfilerStart()
     print(f"sampling on device: {device}", flush=True)
     timer = Timer()
+    sampling_timers = []
+    feature_timers = []
+    forward_timers = []
+    backward_timers = []
+    edges_computed = []
     for epoch in range(config.num_epoch):
+        edges_computed_epoch = 0
+        sampling_timer = CudaTimer()
         for input_nodes, output_nodes, blocks in dataloader:
             step += 1
+            sampling_timer.end()
+            feat_timer = CudaTimer()
             batch_feat = dataloader.get_feature()
             batch_label = label[output_nodes]
+            dist.barrier()
+            feat_timer.end()
+            forward_timer = CudaTimer()
             batch_pred = model(blocks, batch_feat)
+            for block in blocks:
+                edges_computed_epoch += block.num_edges()
+            forward_timer.end()
+            backward_timer = CudaTimer()
             batch_loss = torch.nn.functional.cross_entropy(batch_pred, batch_label)
             optimizer.zero_grad()
             batch_loss.backward()
+            backward_timer.end()
             optimizer.step()
+            sampling_timers.append(sampling_timer)
+            feature_timers.append(feat_timer)
+            forward_timers.append(forward_timer)
+            backward_timers.append(backward_timer)
+            sampling_timer = CudaTimer()
             log_step(rank, epoch, step, step_per_epoch, timer)
+        edges_computed.append(edges_computed_epoch)
     dist.barrier()
     CudaProfilerStop()
+    duration = timer.duration()
 
-    if config.graph_name == "products":
+    sampling_time = get_duration(sampling_timers)
+    feature_time = get_duration(feature_timers)
+    forward_time = get_duration(forward_timers)
+    backward_time = get_duration(backward_timers)
+
+    if config.graph_name == "products2":
         t2 = Timer()
         print(f"testing model accuracy on {device}")
         model.eval()
@@ -104,5 +143,12 @@ def train_split_ddp(rank: int, config: Config, unique_id,
         if rank == 0:
             print(f"test accuracy={acc}% in {t2.duration()} secs")
         dist.barrier()
+    else:
+        acc = 0
 
+    if rank == 0:
+        profiler = Profiler(duration=duration, sampling_time=sampling_time,
+                            feature_time=feature_time, forward_time=forward_time, backward_time=backward_time, test_acc=acc)
+        profile_edge_skew(edges_computed, profiler, rank)
+        write_to_csv(config.log_path, [config], [profiler])
     ddp_exit()

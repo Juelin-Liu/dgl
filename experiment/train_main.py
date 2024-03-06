@@ -27,7 +27,6 @@ if __name__ == "__main__":
         fanouts[idx] = int(fanout)
     dir_path = os.path.dirname(os.path.realpath(__file__))
     log_path = os.path.join(dir_path, "logs/exp.csv")
-    
     config = Config(graph_name=graph_name,
                     world_size=world_size,
                     num_partition=world_size,

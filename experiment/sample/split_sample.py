@@ -33,7 +33,7 @@ def _split_sample(rank: int, config: Config, NcclUniqueId, graph: dgl.DGLGraph, 
 
     dataloader = SplitGraphLoader(graph, partition_map, train_idx, NcclUniqueId, sample_config)
     step = 0
-    step_per_epoch = dataloader.num_step_per_epoch
+    step_per_epoch = dataloader.max_step_per_epoch
     CudaProfilerStart()
     print(f"sampling on device: {device}", flush=True)
     timer = Timer()
