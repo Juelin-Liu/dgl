@@ -4,10 +4,11 @@ import gc
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.multiprocessing import spawn
-from node.model import *
+from nodepred.model import *
 from node.utils import *
 from dgl.dev import *
-
+from utils import *
+from dgl.dev.dataloader import *
 # This function split the feature data horizontally
 # each node's data is partitioned into 'world_size' chunks
 # return the partition corresponding to the 'rank'
@@ -208,12 +209,11 @@ def train_p3_ddp(rank: int, config: Config, graph: dgl.DGLGraph, global_feat: to
         #global_optimizer.step()
         torch.cuda.synchronize()
         dist.barrier()
+        local_optimizer.zero_grad()
         for r, global_grad in enumerate(global_grad_lst):
             if r != rank:
-                local_optimizer.zero_grad()
                 local_hid_buffer_lst[r].backward(global_grad)
-                local_optimizer.step()
-        
+        local_optimizer.step()
         global_optimizer.step()
         torch.cuda.synchronize()
         if step > PREHEAT_STEP:
@@ -227,8 +227,7 @@ def train_p3_ddp(rank: int, config: Config, graph: dgl.DGLGraph, global_feat: to
     forward_timers = []
     backward_timers = []
     edges_computed = []
-    
-    step_per_epoch = dataloader.target_idx.shape[0] // dataloader.batch_size + 1
+    step_per_epoch = dataloader.max_step_per_epoch
     step = 0
     for epoch in range(config.num_epoch):
         if rank == 0 and (epoch + 1) % 5 == 0:
@@ -307,11 +306,11 @@ def train_p3_ddp(rank: int, config: Config, graph: dgl.DGLGraph, global_feat: to
             batch_loss.backward()
             
             global_optimizer.step()
+            local_optimizer.zero_grad()
             for r, global_grad in enumerate(global_grad_lst):
                 if r != rank:
-                    local_optimizer.zero_grad()
                     local_hid_buffer_lst[r].backward(global_grad)
-                    local_optimizer.step()
+            local_optimizer.step()
                     
             torch.cuda.synchronize()
             backward_timer.end()
@@ -336,7 +335,7 @@ def train_p3_ddp(rank: int, config: Config, graph: dgl.DGLGraph, global_feat: to
     forward_time = get_duration(forward_timers)
     backward_time = get_duration(backward_timers)
     profiler = Profiler(duration=duration, sampling_time=sampling_time, feature_time=feature_time, forward_time=forward_time, backward_time=backward_time, test_acc=0)
-    profile_edge_skew(edges_computed, profiler, rank, dist)
+    profile_edge_skew(edges_computed, profiler, rank)
     if rank == 0:
         print(f"train for {config.num_epoch} epochs in {duration}s")
         if not config.test_model_acc:

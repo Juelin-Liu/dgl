@@ -11,6 +11,7 @@ from node.quiver_sampler import *
 from node.model import *
 from node.utils import *
 from dgl.dev import *
+from utils import *
 
 def bench_quiver_batch(configs: list[Config]):
     for config in configs:
@@ -142,7 +143,7 @@ def train_quiver_ddp(rank: int, config: Config, quiver_sampler: quiver.pyg.Graph
     forward_time = get_duration(forward_timers)
     backward_time = get_duration(backward_timers)
     profiler = Profiler(duration=duration, sampling_time=sampling_time, feature_time=feature_time, forward_time=forward_time, backward_time=backward_time, test_acc=0)
-    profile_edge_skew(edges_computed, profiler, rank, dist)
+    profile_edge_skew(edges_computed, profiler, rank)
     
     if rank == 0 and config.test_model_acc==False:
         write_to_csv(config.log_path, [config], [profiler])

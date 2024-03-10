@@ -42,10 +42,17 @@ if __name__ == "__main__":
                     nvlink=False,
                     partition_type=partition_type,
                     sample_mode=sample_mode)
-
+    config.test_model_acc = True
     if config.system == "split":
         from nodepred.trainer import bench_split
         bench_split(config)
     elif config.system == "dgl":
         from nodepred.trainer import bench_dgl_batch
         bench_dgl_batch([config])
+    elif config.system == "quiver":
+        from nodepred.quiver_trainer import bench_quiver_batch
+        bench_quiver_batch([config])
+    elif config.system == "p3":
+        from nodepred.p3_trainer import bench_p3_batch
+        bench_p3_batch([config])
+

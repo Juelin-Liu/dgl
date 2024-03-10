@@ -168,3 +168,6 @@ cscope.*
 
 # model file
 *.pth
+
+
+cmake-build-debug/
