@@ -128,7 +128,7 @@ def train_dgl(rank: int, config: Config, graph: dgl.DGLGraph, feat: torch.Tensor
     profile_edge_skew(edges_computed, profiler, rank)
     
     CudaProfilerStop()
-    if config.graph_name == "products":
+    if config.graph_name == "products" and config.test_model_acc:
         t2 = Timer()
         print(f"testing model accuracy on {device}")
         model.eval()

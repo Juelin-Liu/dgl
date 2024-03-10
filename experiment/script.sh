@@ -1,5 +1,7 @@
 #!/bin/bash
-for model in gat;
+for graph in friendster #products papers100M  orkut friendster;
+do
+for model in sage #gat;
 do
 for world_size in 4 ;
 	do
@@ -15,8 +17,11 @@ for world_size in 4 ;
         fi
 	for cache_size in ${cache_sizes};
 do	
-	python3 train_main.py --system=p3 --model=${model} --fanout="20,20,20" --graph=products --world_size=${world_size}  --data_dir=/data/gsplit --cache_size=${cache_size} --batch_size=${batch_size}
-
+	for system in split  #dgl ;
+	do
+	python3 train_main.py --system=${system} --model=${model} --fanout="15,15,15" --graph=${graph} --world_size=${world_size}  --data_dir=/data/gsplit --cache_size=${cache_size} --batch_size=${batch_size}
+  done
+done
 done
 done
 done
