@@ -15,7 +15,7 @@ class GraphDataloader:
         self.fanouts = config.fanouts
         self.replace = config.replace
         self.reindex = config.reindex
-        self.batch_size = config.batch_size // config.world_size
+        self.batch_size = config.batch_size // (config.world_size * config.num_nodes)
         self.config = config
 
         if config.mode == "uva":
@@ -40,9 +40,11 @@ class GraphDataloader:
         SetFanout(fanouts)
         
     def set_target_idx(self, target_idx):
-        self.loc_idx_size = target_idx.shape[0] // self.config.world_size + 1
+        self.loc_idx_size = target_idx.shape[0] // (self.config.world_size * self.config.num_nodes) + 1
         # self.global_target_idx = target_idx
-        self.local_target_idx = target_idx[self.rank * self.loc_idx_size:(self.rank + 1) * self.loc_idx_size].type(self.target_type).clone()
+        self.local_target_idx = target_idx[ \
+            ((self.config.num_nodes *self.config.node_rank) + self.rank) * self.loc_idx_size :\
+            ((self.config.num_nodes *self.config.node_rank) + self.rank + 1) * self.loc_idx_size].type(self.target_type).clone()
         self.shuffle = True
         self.max_step_per_epoch = self.local_target_idx.shape[0] // self.batch_size
         self.idx_loader = IdxLoader(d=self.device, target_idx=self.local_target_idx,

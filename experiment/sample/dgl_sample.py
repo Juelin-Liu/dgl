@@ -29,7 +29,7 @@ def _dgl_sample(rank: int, config: Config, graph: dgl.DGLGraph, train_idx: torch
     device = torch.cuda.current_device()
     sample_config = SampleConfig(rank=rank, num_partition=config.num_partition, batch_size=config.batch_size,
                                  world_size=config.world_size, mode=config.sample_mode, fanouts=config.fanouts, 
-                                 reindex=True, drop_last=True)
+                                 reindex=True, drop_last=True,  node_rank=config.node_rank, num_nodes=config.num_nodes)
 
     dataloader = GraphDataloader(g=graph, target_idx=train_idx, config=sample_config)
     step = 0

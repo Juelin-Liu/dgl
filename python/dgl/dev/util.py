@@ -6,6 +6,8 @@ from dataclasses import dataclass
 class SampleConfig:
     rank: int = 0
     world_size: int = 1
+    node_rank: int = 0
+    num_nodes: int = 1
     num_partition: int = 1
     batch_size: int = 1024
     replace: bool = False
@@ -16,11 +18,13 @@ class SampleConfig:
 
     @staticmethod
     def header():
-        return ["rank", "world_size", "num_partition", "batch_size", "replace", "mode", "reindex", "fanouts"]
+        return ["rank", "world_size", "node_rank", "num_nodes", "num_partition", "batch_size", "replace", "mode", "reindex", "fanouts"]
 
     def content(self):
         return [self.rank,
                 self.world_size,
+                self.node_rank,
+                self.num_nodes,
                 self.num_partition,
                 self.batch_size,
                 self.replace,

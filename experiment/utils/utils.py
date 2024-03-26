@@ -5,11 +5,13 @@ import torch.distributed as dist
 from .config import Config
 from .profiler import Profiler
 
-def ddp_setup(rank, world_size):
+def ddp_setup(local_rank, local_world_size, node_rank, num_nodes):
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "12355"
-    dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
-    torch.cuda.set_device(rank)
+    global_rank = node_rank * local_world_size + local_rank
+    global_world_size = local_world_size * num_nodes
+    dist.init_process_group(backend="nccl", rank = global_rank, world_size=global_world_size)
+    torch.cuda.set_device(local_rank)
 
 def ddp_exit():
     dist.destroy_process_group()

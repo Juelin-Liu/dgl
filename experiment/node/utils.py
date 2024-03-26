@@ -9,11 +9,13 @@ from dgl.utils import pin_memory_inplace, gather_pinned_tensor_rows
 
 PREHEAT_STEP=100
 
-def ddp_setup(rank, world_size):
+def ddp_setup(local_rank, local_world_size, node_rank, num_nodes):
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "12355"
-    dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
-    torch.cuda.set_device(rank)
+    global_rank = node_rank * local_world_size + local_rank
+    global_world_size = local_world_size * num_nodes
+    dist.init_process_group(backend="nccl", rank = global_rank, world_size=global_world_size)
+    torch.cuda.set_device(local_rank)
 
 def ddp_exit():
     dist.destroy_process_group()
@@ -64,7 +66,7 @@ class CudaTimer:
         return duration_s
     
 class Config:
-    def __init__(self, graph_name, world_size, num_partition, num_epoch, fanouts,
+    def __init__(self, graph_name, world_size, num_nodes,  num_partition, num_epoch, fanouts,
                  batch_size, system, model, hid_size, cache_size, log_path, data_dir):
         try:
             self.machine_name = os.environ['MACHINE_NAME']
@@ -88,7 +90,7 @@ class Config:
         self.num_classes = -1
         self.partition_type = "edge_balanced"
         self.test_model_acc = False
-        
+        self.num_nodes = num_nodes
     def get_file_name(self):
         if "groot" not in self.system:
             return (f"{self.system}_{self.graph_name}_{self.model}_{self.batch_size}_{self.hid_size}_" + \
@@ -105,7 +107,7 @@ class Config:
     def content(self):
         connection = "_nvlink" if self.nvlink else "_pcie"
         machine_name = self.machine_name + connection
-        return [pd.Timestamp('now'), machine_name, self.graph_name, self.in_feat, self.world_size, self.num_partition, self.num_epoch, self.fanouts, self.num_redundant_layer, \
+        return [pd.Timestamp('now'), machine_name, self.graph_name, self.in_feat, self.world_size * self.num_nodes  , self.num_partition, self.num_epoch, self.fanouts, self.num_redundant_layer, \
                     self.batch_size, self.system, self.model, self.hid_size, self.cache_size, self.partition_type]
 
     def __repr__(self):

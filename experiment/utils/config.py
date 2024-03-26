@@ -2,7 +2,7 @@ import os
 import pandas as pd
 
 class Config:
-    def __init__(self, graph_name, world_size, num_partition, num_epoch, fanouts,
+    def __init__(self, graph_name, world_size,  node_rank, num_nodes, num_partition, num_epoch, fanouts,
                  batch_size, system, model, hid_size, cache_size, log_path, data_dir,
                  nvlink = False, partition_type="ndst_efreq_xbal", sample_mode="uva"):
         try:
@@ -28,6 +28,8 @@ class Config:
         self.in_feat = -1
         self.num_classes = -1
         self.test_model_acc = False
+        self.num_nodes = num_nodes
+        self.node_rank = node_rank
         
     def get_file_name(self):
         if "groot" not in self.system:
@@ -45,7 +47,8 @@ class Config:
     def content(self):
         connection = "_nvlink" if self.nvlink else "_pcie"
         machine_name = self.machine_name + connection
-        return [pd.Timestamp('now'), machine_name, self.graph_name, self.in_feat, self.world_size, self.num_partition, self.num_epoch, self.fanouts, self.num_redundant_layer, \
+        return [pd.Timestamp('now'), machine_name, self.graph_name, self.in_feat,\
+                f"{self.world_size} * {self.num_nodes}", self.num_partition, self.num_epoch, self.fanouts, self.num_redundant_layer, \
                     self.batch_size, self.system, self.model, self.hid_size, self.cache_size, self.partition_type]
 
     def __repr__(self):

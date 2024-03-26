@@ -12,7 +12,16 @@ from dgl.dev.splitmodel import get_distributed_model
 def load_partition_map(config: Config, node_mode: str, edge_mode: str, bal: str, num_partitions=4):
     in_dir = os.path.join(config.data_dir, "partition_ids", config.graph_name)
     file_name = f"{config.graph_name}_w{num_partitions}_n{node_mode}_e{edge_mode}_{bal}.pt"
-    return torch.load(os.path.join(in_dir, file_name)).type(torch.int8)
+    if num_partitions != 2:
+        p_map = torch.load(os.path.join(in_dir, file_name)).type(torch.int8)
+    else:
+        # Merge 4 partitions into 2
+        file_name = f"{config.graph_name}_w4_n{node_mode}_e{edge_mode}_{bal}.pt"
+        p_map = torch.load(os.path.join(in_dir, file_name)).type(torch.int8)
+        p_map[p_map == 2] = 0
+        p_map[p_map == 3] = 1
+
+    return p_map
 
 
 def bench_split(config: Config, node_mode: str, edge_mode: str, bal: str):

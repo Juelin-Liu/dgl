@@ -45,7 +45,15 @@ def load_feat_label(in_dir) -> tuple[torch.Tensor, torch.Tensor, int]:
 def load_partition_map(config: Config):
     in_dir = os.path.join(config.data_dir, "partition_ids", config.graph_name)
     file_name = f"{config.graph_name}_w{config.num_partition}_{config.partition_type}.pt"
-    return torch.load(os.path.join(in_dir, file_name)).type(torch.int8)
+    if config.num_partition != 2:
+        p_map = torch.load(os.path.join(in_dir, file_name)).type(torch.int8)
+    else:
+        file_name = f"{config.graph_name}_w4_{config.partition_type}.pt"
+        p_map = torch.load(os.path.join(in_dir, file_name)).type(torch.int8)
+        p_map[p_map == 2] = 0
+        p_map[p_map == 3] = 1
+
+    return p_map
 
 def gen_rand_feat(v_num, feat_dim):
     return torch.empty((v_num, feat_dim))

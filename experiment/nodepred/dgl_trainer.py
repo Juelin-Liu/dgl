@@ -35,7 +35,8 @@ def bench_dgl_batch(configs: list[Config]):
         torch.cuda.empty_cache()
             
 def train_dgl(rank: int, config: Config, graph: dgl.DGLGraph, feat: torch.Tensor, label: torch.Tensor, num_label: int, train_idx: torch.Tensor, test_idx: torch.Tensor):
-    ddp_setup(rank, config.world_size)
+    devices = config.devices
+    ddp_setup(rank, config.world_size, devices)
     device = torch.cuda.current_device()
     e2eTimer = Timer()
     if rank == 0:
@@ -43,7 +44,8 @@ def train_dgl(rank: int, config: Config, graph: dgl.DGLGraph, feat: torch.Tensor
     mode = "uva"
     feat_handle  = pin_memory_inplace(feat)
     label = label.to(device)
-    sample_config = SampleConfig(rank=rank, batch_size=config.batch_size, world_size=config.world_size, mode=mode, fanouts=config.fanouts)
+    sample_config = SampleConfig(rank=rank, batch_size=config.batch_size, world_size=config.world_size, \
+                                    mode=mode, fanouts=config.fanouts, device = device)
     dataloader = GraphDataloader(graph, train_idx, sample_config)
     config.in_feat = feat.shape[1]
     model = None
@@ -53,7 +55,7 @@ def train_dgl(rank: int, config: Config, graph: dgl.DGLGraph, feat: torch.Tensor
         model = Sage(in_feats=feat.shape[1], hid_feats=config.hid_size, num_layers=len(config.fanouts), out_feats=num_label)
     model = model.to(device)
     if (config.world_size > 1):
-        model = DDP(model, device_ids=[rank])
+        model = DDP(model, device_ids=[device])
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     
     # print(f"preheating trainer on device: {device}")
