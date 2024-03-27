@@ -36,9 +36,11 @@ if __name__ == "__main__":
                     log_path=log_path,
                     data_dir=data_dir,
                     nvlink=False,
-                    partition_type=get_partition_type(node_weight, edge_weight, bal),
-                    sample_mode=sample_mode)
-    if cfg.system == "split":
+                    partition_type=partition_type,
+                    sample_mode=sample_mode,
+                    num_nodes=args.num_nodes,
+                    node_rank=args.node_rank)
+    if config.system == "split":
         from nodepred.trainer import bench_split
         bench_split(cfg)
     elif cfg.system == "dgl":
