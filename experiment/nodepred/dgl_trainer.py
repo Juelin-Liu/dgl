@@ -54,7 +54,7 @@ def train_dgl(rank: int, config: Config, graph: dgl.DGLGraph, feat: torch.Tensor
     elif config.model == "sage":
         model = Sage(in_feats=feat.shape[1], hid_feats=config.hid_size, num_layers=len(config.fanouts), out_feats=num_label)
     model = model.to(device)
-    if (config.world_size > 1):
+    if (config.world_size * config.num_nodes >  1):
         model = DDP(model, device_ids=[device])
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     
