@@ -35,8 +35,7 @@ def bench_dgl_batch(configs: list[Config]):
         torch.cuda.empty_cache()
             
 def train_dgl(rank: int, config: Config, graph: dgl.DGLGraph, feat: torch.Tensor, label: torch.Tensor, num_label: int, train_idx: torch.Tensor, test_idx: torch.Tensor):
-    devices = config.devices
-    ddp_setup(rank, config.world_size, devices)
+    ddp_setup(rank, config.world_size, config.node_rank, config.num_nodes)
     device = torch.cuda.current_device()
     e2eTimer = Timer()
     if rank == 0:
@@ -45,7 +44,8 @@ def train_dgl(rank: int, config: Config, graph: dgl.DGLGraph, feat: torch.Tensor
     feat_handle  = pin_memory_inplace(feat)
     label = label.to(device)
     sample_config = SampleConfig(rank=rank, batch_size=config.batch_size, world_size=config.world_size, \
-                                    mode=mode, fanouts=config.fanouts, device = device)
+                                    mode=mode, fanouts=config.fanouts,  \
+                         node_rank=config.node_rank, num_nodes=config.num_nodes)
     dataloader = GraphDataloader(graph, train_idx, sample_config)
     config.in_feat = feat.shape[1]
     model = None

@@ -41,7 +41,9 @@ if __name__ == "__main__":
                     data_dir=data_dir,
                     nvlink=False,
                     partition_type=partition_type,
-                    sample_mode=sample_mode)
+                    sample_mode=sample_mode,
+                    num_nodes=args.num_nodes,
+                    node_rank=args.node_rank)
     if config.system == "split":
         from nodepred.trainer import bench_split
         bench_split(config)
