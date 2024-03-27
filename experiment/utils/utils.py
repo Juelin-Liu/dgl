@@ -6,8 +6,13 @@ from .config import Config
 from .profiler import Profiler
 
 def ddp_setup(local_rank, local_world_size, node_rank, num_nodes):
-    os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = "12355"
+    if num_nodes == 0:
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "12355"
+    else:
+        os.environ["MASTER_ADDR"] = "13.59.16.138"
+        os.environ["MASTER_PORT"] = "12355"
+
     global_rank = node_rank * local_world_size + local_rank
     global_world_size = local_world_size * num_nodes
     dist.init_process_group(backend="nccl", rank = global_rank, world_size=global_world_size)
