@@ -15,11 +15,12 @@ def ddp_setup(local_rank, local_world_size, node_rank, num_nodes):
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = "12355"
     else:
-        os.environ["MASTER_ADDR"] = "13.59.16.138"
+        os.environ["MASTER_ADDR"] = "3.139.229.20"
         os.environ["MASTER_PORT"] = "12355"
 
     global_rank = node_rank * local_world_size + local_rank
     global_world_size = local_world_size * num_nodes
+    print(global_rank, global_world_size)
     dist.init_process_group(backend="nccl", rank = global_rank, world_size=global_world_size)
     torch.cuda.set_device(local_rank)
 
