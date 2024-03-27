@@ -43,9 +43,10 @@ class GraphDataloader:
         self.loc_idx_size = target_idx.shape[0] // (self.config.world_size * self.config.num_nodes) + 1
         # self.global_target_idx = target_idx
         self.local_target_idx = target_idx[ \
-            ((self.config.num_nodes *self.config.node_rank) + self.rank) * self.loc_idx_size :\
-            ((self.config.num_nodes *self.config.node_rank) + self.rank + 1) * self.loc_idx_size].type(self.target_type).clone()
+            ((self.config.world_size *self.config.node_rank) + self.rank) * self.loc_idx_size :\
+            ((self.config.world_size *self.config.node_rank) + self.rank + 1) * self.loc_idx_size].type(self.target_type).clone()
         self.shuffle = True
+        print(target_idx.shape, self.local_target_idx.shape, "target idx")
         self.max_step_per_epoch = self.local_target_idx.shape[0] // self.batch_size
         self.idx_loader = IdxLoader(d=self.device, target_idx=self.local_target_idx,
                                      batch_size=self.batch_size,
