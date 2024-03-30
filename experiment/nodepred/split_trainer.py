@@ -32,7 +32,7 @@ def train_split_ddp(rank: int, config: Config, unique_id,
                     graph: dgl.DGLGraph, feat:torch.Tensor, label: torch.Tensor, 
                     train_idx: torch.Tensor, test_idx: torch.Tensor, 
                     partition_map: torch.Tensor):
-    ddp_setup(rank, config.world_size, config.devices)
+    ddp_setup(rank, config.world_size, config.node_rank, config.num_nodes)
     device = torch.cuda.current_device()
     if rank == 0:
         print(config)
@@ -50,7 +50,7 @@ def train_split_ddp(rank: int, config: Config, unique_id,
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     sample_config = SampleConfig(rank=rank, num_partition=config.num_partition, batch_size=config.batch_size,
                                  world_size=config.world_size, mode=mode, fanouts=config.fanouts, reindex=True,
-                                 drop_last=True, device = device, node_rank=config.node_rank, num_nodes=config.num_nodes)
+                                 drop_last=True,  node_rank=config.node_rank, num_nodes=config.num_nodes)
 
     dataloader = SplitGraphLoader(graph, partition_map, train_idx, unique_id, sample_config)
     

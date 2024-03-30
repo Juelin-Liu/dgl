@@ -24,7 +24,7 @@ class SplitGraphLoader:
         # self.global_target_idx = target_idx
         target_idx = target_idx[ \
                                 config.node_rank * self.node_loc_idx_size : \
-                                (config.node_rank+ 1) * self.node_loc_idx_size].type(self.target_type).clone()
+                                (config.node_rank+ 1) * self.node_loc_idx_size].clone()
 
         print("target_idx shape", target_idx)
         self.loc_idx_size = target_idx.shape[0] // config.world_size + 1
