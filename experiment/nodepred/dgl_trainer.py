@@ -41,6 +41,7 @@ def train_dgl(rank: int, config: Config, graph: dgl.DGLGraph, feat: torch.Tensor
     if rank == 0:
         print(config)
     mode = "uva"
+    dist.barrier()
     feat_handle  = pin_memory_inplace(feat)
     label = label.to(device)
     sample_config = SampleConfig(rank=rank, batch_size=config.batch_size, world_size=config.world_size, \
