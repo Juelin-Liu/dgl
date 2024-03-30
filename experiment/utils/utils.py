@@ -7,9 +7,11 @@ from .profiler import Profiler
 
 def ddp_setup(local_rank, local_world_size, node_rank, num_nodes):
     if num_nodes == 0:
+        print("local")
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = "12355"
     else:
+        print("distributed")
         os.environ["MASTER_ADDR"] = "3.139.229.20"
         os.environ["MASTER_PORT"] = "12355"
 

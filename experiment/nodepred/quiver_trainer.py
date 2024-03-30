@@ -93,8 +93,8 @@ def train_quiver_ddp(rank: int, config: Config, quiver_sampler: quiver.pyg.Graph
         if step > PREHEAT_STEP:
             dataloader.reset()
             break
-        
-    dist.barrier()
+    #dist.barrier()
+    dataloader.reset()
     print(f"training model on device: {device}", flush=True)        
     timer = Timer()
     sampling_timers = []
@@ -114,7 +114,9 @@ def train_quiver_ddp(rank: int, config: Config, quiver_sampler: quiver.pyg.Graph
             feat_timer = CudaTimer()
             batch_feat = feat[input_nodes]
             batch_label = label[output_nodes]
-            dist.barrier()
+            #remove barrier for multi node training
+            #dist.barrier()
+
             feat_timer.end()            
             
             forward_timer = CudaTimer()
