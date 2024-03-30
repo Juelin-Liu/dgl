@@ -33,7 +33,13 @@ def bench_quiver_batch(configs: list[Config]):
     quiver_sampler = quiver.GraphSageSampler(csr_topo=csr_topo, sizes=config.fanouts, device=0, mode=sampling_mode)
     del feat
     gc.collect()
-    
+    loc_idx_size = train_idx.shape[0] // ( config.num_nodes) + 1
+    # self.global_target_idx = target_idx
+    local_target_idx = train_idx[ \
+            config.node_rank * loc_idx_size :\
+            (config.node_rank + 1) *  loc_idx_size].clone()
+    print(local_target_idx.shape)
+    train_idx = local_target_idx
     for config in configs:
         config.num_classes = num_label
         try:
@@ -50,7 +56,7 @@ def bench_quiver_batch(configs: list[Config]):
         # torch.cuda.empty_cache()
             
 def train_quiver_ddp(rank: int, config: Config, quiver_sampler: quiver.pyg.GraphSageSampler, feat: quiver.Feature, label: torch.Tensor, num_label: int, train_idx: torch.Tensor, test_idx: torch.Tensor):
-    ddp_setup(rank, config.world_size)
+    ddp_setup(rank, config.world_size, config.node_rank, config.num_nodes)
     device = torch.cuda.current_device()
     e2eTimer = Timer()
     if rank == 0:

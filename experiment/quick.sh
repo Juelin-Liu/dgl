@@ -12,8 +12,8 @@
 
 graph=products
 model=sage
-python3 train_main.py --system=dgl --model=${model} --fanout=15,15,15 --graph=${graph} --world_size=1 \
-	--data_dir=/data/gsplit --cache_size=8G --batch_size=512 --num_epoch=2  --num-nodes=2 --node-rank=0
+python3 train_main.py --system=quiver --model=${model} --fanout=15,15,15 --graph=${graph} --world_size=4 \
+	--data_dir=/data/gsplit --cache_size=8G --batch_size=1024 --num_epoch=2  --num-nodes=1 --node-rank=0
 
 
 
