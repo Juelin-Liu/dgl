@@ -42,17 +42,19 @@ if(NCCL_LIBRARY)
     endif()
 endif()
 
-if(BUILD_WITH_SHARED_NCCL)
-    # libnccl.so
-    set(NCCL_LIB_NAME nccl)
-else()
-    # libnccl_static.a
-    set(NCCL_LIB_NAME nccl_static)
-endif()
+# if(BUILD_WITH_SHARED_NCCL)
+#     # libnccl.so
+#     set(NCCL_LIB_NAME nccl)
+# else()
+#     # libnccl_static.a
+#     set(NCCL_LIB_NAME nccl_static)
+# endif()
+
+set(NCCL_LIB_NAME nccl)
 
 find_path(NCCL_INCLUDE_DIR
         NAMES nccl.h
-        HINTS  ${NCCL_ROOT}/include $ENV{NCCL_ROOT}/include)
+        HINTS  ${NCCL_ROOT}/include $ENV{NCCL_ROOT}/include ${CONDA_PREFIX}/include)
 
 if(USE_DLOPEN_NCCL)
     include(FindPackageHandleStandardArgs)
@@ -62,7 +64,7 @@ if(USE_DLOPEN_NCCL)
 else()
     find_library(NCCL_LIBRARY
             NAMES ${NCCL_LIB_NAME}
-            HINTS ${NCCL_ROOT}/lib $ENV{NCCL_ROOT}/lib/)
+            HINTS ${NCCL_ROOT}/lib $ENV{NCCL_ROOT}/lib/ ${CONDA_PREFIX}/lib)
 
     message(STATUS "Using nccl library: ${NCCL_LIBRARY}")
 
