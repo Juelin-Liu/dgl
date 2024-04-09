@@ -362,13 +362,20 @@ if (USE_LIBXSMM)
   target_include_directories(dgl PRIVATE "third_party/libxsmm/include")
 endif()
 
-target_include_directories(dgl PRIVATE ${CMAKE_SOURCE_DIR}/third_party/METIS/build/include)
-target_link_directories(dgl PRIVATE ${CMAKE_SOURCE_DIR}/third_party/METIS/build/lib)
-target_include_directories(dgl PRIVATE ${CMAKE_SOURCE_DIR}/third_party/oneTBB/build/include)
-target_link_directories(dgl PRIVATE ${CMAKE_SOURCE_DIR}/third_party/oneTBB/build/lib)
-target_include_directories(dgl PRIVATE ${CMAKE_SOURCE_DIR}/third_party/nccl/build/include)
-target_link_directories(dgl PRIVATE ${CMAKE_SOURCE_DIR}/third_party/nccl/build/lib)
+# target_include_directories(dgl PRIVATE ${CMAKE_SOURCE_DIR}/third_party/METIS/GKlib/)
+# target_link_directories(dgl PRIVATE ${CMAKE_SOURCE_DIR}/third_party/METIS/GKlib/build/)
 
+# target_include_directories(dgl PRIVATE ${CMAKE_SOURCE_DIR}/third_party/METIS/build/include)
+# target_link_directories(dgl PRIVATE ${CMAKE_SOURCE_DIR}/third_party/METIS/build/lib)
+
+# target_include_directories(dgl PRIVATE ${CMAKE_SOURCE_DIR}/third_party/oneTBB/build/include)
+# target_link_directories(dgl PRIVATE ${CMAKE_SOURCE_DIR}/third_party/oneTBB/build/lib)
+
+# target_include_directories(dgl PRIVATE ${CMAKE_SOURCE_DIR}/third_party/nccl/build/include)
+# target_link_directories(dgl PRIVATE ${CMAKE_SOURCE_DIR}/third_party/nccl/build/lib)
+
+target_include_directories(dgl PRIVATE ${CMAKE_SOURCE_DIR}/third_party/build/include)
+target_link_directories(dgl PRIVATE ${CMAKE_SOURCE_DIR}/third_party/build/lib)
 list(APPEND DGL_LINKER_LIBS metis GKlib tbb tbbmalloc nccl)
 
 # Avoid exposing third-party symbols when using DGL as a library.
