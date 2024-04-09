@@ -1,6 +1,10 @@
 #!/bin/bash
-bash init.sh
-# build nccl for all supported devices
-# pushd third_party/nccl && make -j src.build && popd
+export CUDA_HOME="${CUDA_HOME:=/usr/local/cuda}"
 
-cmake -B build -GNinja && cmake --build build -j
+echo "CUDA_HOME=$CUDA_HOME"
+
+bash init.sh
+
+cmake -B build -GNinja
+
+cmake --build build -j
