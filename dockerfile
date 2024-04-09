@@ -2,8 +2,6 @@ FROM nvidia/cuda:11.8.0-devel-ubuntu22.04
 
 SHELL ["/bin/bash", "--login", "-c"]
 
-RUN export CUDA_HOME=/usr/local/cuda
-
 RUN apt update
 
 RUN apt install -y wget
@@ -35,15 +33,8 @@ RUN /conda/bin/pip install pyg_lib torch_scatter torch_sparse torch_cluster torc
 # install dependencies
 RUN /conda/bin/pip install torchmetrics jupyterlab numpy matplotlib pandas ogb
 
-# copy source file
+ENV CUDA_HOME=/usr/local/cuda
+
 COPY . /spara
 
 WORKDIR /spara
-
-# set environment variable
-RUN export CUDA_HOME=/usr/local/cuda
-
-# build project
-RUN /conda/bin/conda run -n base bash ./build.sh
-
-RUN /conda/bin/conda run -n base cd ./python && pip install .

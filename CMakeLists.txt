@@ -7,6 +7,7 @@ message(STATUS "Start configuring project ${PROJECT_NAME}")
 message("CMAKE CUDA_HOME: $ENV{CUDA_HOME}")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CUDA_ARCHITECTURES "native")
 # cmake utils
 include(cmake/util/Util.cmake)
 include(cmake/util/MshadowUtil.cmake)

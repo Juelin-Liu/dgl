@@ -8,3 +8,5 @@ bash init.sh
 cmake -B build -GNinja
 
 cmake --build build -j
+
+cd python && pip install .
