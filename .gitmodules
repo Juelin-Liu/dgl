@@ -37,3 +37,9 @@
 [submodule "third_party/nccl"]
 	path = third_party/nccl
 	url = https://github.com/NVIDIA/nccl.git
+[submodule "third_party/dist_cache/torch-quiver"]
+	path = third_party/dist_cache/torch-quiver
+	url = https://github.com/sandeep06011991/torch-quiver.git
+[submodule "third_party/torch-quiver"]
+	path = third_party/torch-quiver
+	url = https://github.com/quiver-team/torch-quiver.git
