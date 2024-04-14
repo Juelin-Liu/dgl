@@ -20,6 +20,7 @@ sudo sh cuda_12.3.2_545.23.08_linux.run --silent --driver
 sudo reboot
 ```
 
+# Option 1: Using Docker
 ## Install NVIDIA Container Toolkit
 We recommend using docker to create the development environment. To do this, you need to [configure docker](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) to use nvidia GPUs inside a container. After installing Docker and the Nvidia driver, you can follow the remaining instructions to install the nvidia container toolkit.
 
@@ -48,8 +49,30 @@ sudo docker build -t spara:latest .
 ## Run the docker image
 
 ```bash
-sudo docker run --gpus all -it spara:latest
+sudo docker run --gpus --shm-size=180GB all -it spara:latest
 ```
+
+# Option 2: Not Using Docker 
+
+```bash
+conda create -n spara python=3.10
+conda activate spara
+
+# install pytorch v2.0
+pip install torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --index-url https://download.pytorch.org/whl/cu118
+
+# install pyg
+pip install torch_geometric
+
+# install pyg lib
+pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.0.0+cu118.html
+
+# install dependencies
+pip install torchmetrics jupyterlab numpy matplotlib pandas ogb
+```
+
+Then, install CUDA toolkit 11.8 and set `CUDA_HOME` environment variable accordingly.
+Also install a C++ compiler, CMake, and Ninja, which will be used to build the source code.
 
 ## Build Spara from the source
 
@@ -60,8 +83,32 @@ Then, you can build the project by running:
 ./build.sh
 ```
 
-# Download Dataset
+Then, check if you have installed Spara correctly:
+```bash
+python -c "import dgl; print(dgl.__path__)"
+```
+The output should be something like `['/conda/lib/python3.10/site-packages/dgl']`, indicating you have installed Spara correctly.
 
-## Preprocessed Dataset
+# Download Dataset
+| Item | Description | Download Size | Uncompressed Size |  
+| --- | --- | --- | --- | 
+| [Graphs](https://spara-artifact.s3.us-east-2.amazonaws.com/dataset.tar.gz) | It contains graph topology, label, node and edge weights for produces, paper100M, orkut and friendster. | 75GB | 144GB | \
+| [Partition Maps](https://spara-artifact.s3.us-east-2.amazonaws.com/partition_map.tar.gz) | Contains partition maps for produces, paper100M, orkut and friendster using different combination of nodes and edge weights | 1GB | 4.1GB |
+
+You can use the following script to download the dataset and save it to `./dataset` directory.
+
+```bash
+dataset_dir=${PWD}/dataset
+mkdir -p $dataset_dir
+pushd $dataset_dir
+wget https://spara-artifact.s3.us-east-2.amazonaws.com/partition_map.tar.gz
+tar -xvf partition_map.tar.gz && mv numpy partition_map
+
+wget https://spara-artifact.s3.us-east-2.amazonaws.com/dataset.tar.gz
+tar -xvf dataset.tar.gz && mv numpy graph
+rm *.tar.gz
+popd
+```
+After executing the following script the graph topology data will be in `./dataset/graph` directory whereas the partition maps will be inside `./dataset/partition_map` directory.
 
 # Run Experiments
