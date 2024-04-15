@@ -5,7 +5,7 @@ import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.multiprocessing import spawn
 from nodepred.model import *
-from node.utils import *
+# from node.utils import *
 from dgl.dev import *
 from utils import *
 from dgl.dev.dataloader import *
@@ -88,8 +88,7 @@ def train_p3_ddp(rank: int, config: Config, graph: dgl.DGLGraph, global_feat: to
     ddp_setup(rank, config.world_size)
     device = torch.cuda.current_device()
     e2eTimer = Timer()
-    if rank == 0:
-        print(config)
+
         
     if global_feat is not None:
         feat = get_p3_local_feat(rank, config.world_size, global_feat).clone()
@@ -97,7 +96,7 @@ def train_p3_ddp(rank: int, config: Config, graph: dgl.DGLGraph, global_feat: to
         feat_dim = get_feat_dim(config) // config.world_size
         feat = gen_rand_feat(v_num=graph.num_nodes(), feat_dim=feat_dim)
 
-    config.in_feat = feat.shape[1]    
+    config.in_feat = feat.shape[1]
     assert(config.in_feat > 0)
     feat_handle = None
     label_handle = None
@@ -112,6 +111,8 @@ def train_p3_ddp(rank: int, config: Config, graph: dgl.DGLGraph, global_feat: to
     graph = graph.pin_memory_()    
     mode = "uva"
 
+    if rank == 0:
+        print(config)
         
     sample_config = SampleConfig(rank=rank, batch_size=config.batch_size, world_size=config.world_size, mode=mode, fanouts=config.fanouts)
     dataloader = GraphDataloader(graph, train_idx, sample_config)
@@ -145,7 +146,7 @@ def train_p3_ddp(rank: int, config: Config, graph: dgl.DGLGraph, global_feat: to
     step = 0
     for input_nodes, output_nodes, blocks in dataloader:
         step += 1       
-        print(f"{step=}", flush=True)
+        # print(f"{step=}", flush=True)
         # 2. feature extraction and shuffling
         top_block: dgl.DGLGraph = blocks[0]
         src, dst = top_block.adj_tensors("coo")

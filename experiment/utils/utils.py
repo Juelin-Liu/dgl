@@ -5,6 +5,10 @@ import torch.distributed as dist
 from .config import Config
 from .profiler import Profiler
 
+def get_tensor_size(intensor: torch.Tensor):
+    num_bytes = intensor.element_size() * intensor.nelement()
+    return f"{round(num_bytes / 1e9, 1)}GB"
+
 def ddp_setup(rank, world_size):
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "12355"

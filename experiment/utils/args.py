@@ -11,7 +11,7 @@ def get_args():
     parser.add_argument('--hid_size', default=256, type=int, help="Model hidden dimension")
     parser.add_argument('--cache_size', default="0MB", type=str, help="Feature data cache size")
     parser.add_argument('--sample_mode', default="uva", type=str, help="Sample mode", choices=["uva", "gpu"])
-    parser.add_argument('--data_dir', default="/data/juelin/dataset/gsplit", type=str, help="Input graph directory")
+    parser.add_argument('--data_dir', required=True, type=str, help="Input graph directory")
     parser.add_argument('--world_size', default=4, type=int, help='Number of GPUs')
     parser.add_argument('--nmode', default="dst", type=str, help="Node weight configuraion", choices=["uniform", "degree", "src", "dst", "input", "random"] )
     parser.add_argument('--emode', default="freq", type=str, help="Edge weight configuraion", choices=["uniform", "freq", "random"])

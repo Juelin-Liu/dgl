@@ -53,19 +53,17 @@ def train_split_ddp(rank: int, config: Config, unique_id,
                                  drop_last=True)
 
     dataloader = SplitGraphLoader(graph, partition_map, train_idx, unique_id, sample_config)
+    local_ids = torch.empty([], dtype=torch.int64)
     
-    ids = torch.arange(0, partition_map.shape[0])
-    local_ids = ids[partition_map == rank]
-
     if "G" in config.cache_size:
+        ids = torch.arange(0, partition_map.shape[0])
+        local_ids = ids[partition_map == rank]
         size = int(config.cache_size.removesuffix("G")) * (1024 ** 3)
         num_ids_cached = min(size // (feat.shape[1] * 4), local_ids.shape[0])
-        local_ids = local_ids[:num_ids_cached]
-        print(f"nodes cached {num_ids_cached}")
-    else:
-        assert(config.cache_size == "0MB")
+        local_ids = local_ids[:num_ids_cached].clone()
+    
+    print(f"rank {rank} cached {local_ids.shape} nodes")
 
-    local_ids = local_ids.clone()
     dataloader.init_featloader(feat, local_ids)
     step = 0
     step_per_epoch = dataloader.max_step_per_epoch

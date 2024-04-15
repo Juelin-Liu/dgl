@@ -1,7 +1,6 @@
 # import torch
 from torch.cuda import max_memory_allocated, max_memory_reserved, current_device
 from torch import tensor
-import torch.distributed as dist
 
 def get_memory_info(device=None, rd=0):
     if device == None:

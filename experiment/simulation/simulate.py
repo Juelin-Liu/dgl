@@ -4,15 +4,8 @@ import gc
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.multiprocessing import spawn
-from node.utils import *
+from utils import *
 from dgl.dev.dataloader import *
-
-def load_partition_map(config:Config, node_mode: str, edge_mode: str, bal: str, num_partitions=4):
-    in_dir = os.path.join(config.data_dir, "partition_ids", config.graph_name)
-    file_name = f"{config.graph_name}_w{num_partitions}_n{node_mode}_e{edge_mode}_{bal}.pt"
-    print(f"using {file_name} as partition map ")
-
-    return torch.load(os.path.join(in_dir, file_name)).type(torch.uint8)
 
 def simulate(config: Config, node_mode: str, edge_mode: str, bal: str):
     graph, train_idx, valid_idx, test_idx = load_topo(config, is_pinned=True)

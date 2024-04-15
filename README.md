@@ -90,11 +90,20 @@ python -c "import dgl; print(dgl.__path__)"
 The output should be something like `['/conda/lib/python3.10/site-packages/dgl']`, indicating you have installed Spara correctly.
 
 # Download Dataset
+# Option I: Download Preprocessed Dataset
 | Item | Description | Download Size | Uncompressed Size |  
 | --- | --- | --- | --- | 
 | [Graphs](https://spara-artifact.s3.us-east-2.amazonaws.com/dataset.tar.gz) | It contains graph topology, label, node and edge weights for produces, paper100M, orkut and friendster. | 75GB | 144GB | \
 | [Partition Maps](https://spara-artifact.s3.us-east-2.amazonaws.com/partition_map.tar.gz) | Contains partition maps for produces, paper100M, orkut and friendster using different combination of nodes and edge weights | 1GB | 4.1GB |
 
-You can use the `download.sh` script to download the dataset and save it to `./dataset` directory. The graph topology data will be in `./dataset/graph` directory whereas the partition maps will be inside `./dataset/partition_map` directory.
+You can use the `download.sh` script to download the dataset and save it to `./dataset` directory. The graph topology data will be in `./dataset/graph` directory whereas the partition maps will be inside `./dataset/graph/partition_map` directory.
+You can change the `dataset_dir` variable inside the download script to change the default downloading folder. Yet, the `partition_map` directory must be inside `graph` directory so the dataloading function can find the maps correctly.
+
+# Option II: Download Raw Dataset and Process Them
+Please refer to [README.md](./experiment/prepare_dataset/README.md) for more details.
 
 # Run Experiments
+## Experiment Result Generation
+
+## Data Analysis and Visualization
+

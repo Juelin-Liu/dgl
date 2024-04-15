@@ -6,10 +6,8 @@ import time
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.multiprocessing import spawn
-import quiver
-from node.quiver_sampler import *
-from node.model import *
-from node.utils import *
+from nodepred.quiver_sampler import *
+from nodepred.model import *
 from dgl.dev import *
 from utils import *
 

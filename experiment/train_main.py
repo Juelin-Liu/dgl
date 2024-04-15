@@ -3,10 +3,7 @@ from utils import get_partition_type, get_args, Config
 
 if __name__ == "__main__":
 
-    args = get_args()
-
-    print(f"input {args=}")
-    
+    args = get_args()    
     graph_name = args.graph_name
     data_dir = args.data_dir
     batch_size = args.batch_size

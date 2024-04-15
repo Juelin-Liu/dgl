@@ -4,14 +4,18 @@ import os
 from .config import Config
 from dgl.utils import pin_memory_inplace, gather_pinned_tensor_rows
 from .timer import Timer
+import numpy as np
+
+def load_numpy(path):
+    return torch.from_numpy(np.load(path))
 
 def load_graph(in_dir, is32=False, wsloop=False, is_sym=False, load_edge_weight=False) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     symtype_str = "sym" if is_sym else "xsym"
-    indptr = torch.load(os.path.join(in_dir, f"indptr_{symtype_str}.pt"))
-    indices = torch.load(os.path.join(in_dir, f"indices_{symtype_str}.pt"))
+    indptr = load_numpy(os.path.join(in_dir, f"indptr_{symtype_str}.npy"))
+    indices = load_numpy(os.path.join(in_dir, f"indices_{symtype_str}.npy"))
     edges = torch.empty(0, dtype=indices.dtype)
     if load_edge_weight:
-        edges = torch.load(os.path.join(in_dir, "edge_weight.pt")).type(torch.int64)
+        edges = load_numpy(os.path.join(in_dir, "edge_weight.npy")).type(torch.int64)
     if wsloop and is_sym == False:
         graph: dgl.DGLGraph = dgl.graph(("csc", (indptr, indices, edges)))
         graph = dgl.add_self_loop(graph)
@@ -27,25 +31,25 @@ def load_dgl_graph(in_dir, is32=False, wsloop=False, is_sym=False, load_edge_wei
 
 def load_idx_split(in_dir, is32=False) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     print("load idx split from", in_dir)
-    train_idx = torch.load(os.path.join(in_dir, f"train_idx.pt"))
-    valid_idx = torch.load(os.path.join(in_dir, f"valid_idx.pt"))
-    test_idx = torch.load(os.path.join(in_dir, f"test_idx.pt"))
+    train_idx = load_numpy(os.path.join(in_dir, f"train_idx.npy"))
+    valid_idx = load_numpy(os.path.join(in_dir, f"valid_idx.npy"))
+    test_idx = load_numpy(os.path.join(in_dir, f"test_idx.npy"))
     if is32:
         return train_idx.type(torch.int32), valid_idx.type(torch.int32), test_idx.type(torch.int32)
     else:
         return train_idx, valid_idx, test_idx
 
 def load_feat_label(in_dir) -> tuple[torch.Tensor, torch.Tensor, int]:
-    feat = torch.load(os.path.join(in_dir, f"feat.pt"))
-    label = torch.load(os.path.join(in_dir, f"label.pt"))
+    feat = load_numpy(os.path.join(in_dir, f"feat.npy"))
+    label = load_numpy(os.path.join(in_dir, f"label.npy"))
     num_labels = torch.unique(label).shape[0]
     return feat, label, num_labels
 
 
 def load_partition_map(config: Config):
-    in_dir = os.path.join(config.data_dir, "partition_ids", config.graph_name)
-    file_name = f"{config.graph_name}_w{config.num_partition}_{config.partition_type}.pt"
-    return torch.load(os.path.join(in_dir, file_name)).type(torch.int8)
+    in_dir = os.path.join(config.data_dir, "partition_map", config.graph_name)
+    file_name = f"{config.graph_name}_w{config.num_partition}_{config.partition_type}.npy"
+    return load_numpy(os.path.join(in_dir, file_name)).type(torch.int8)
 
 def gen_rand_feat(v_num, feat_dim):
     return torch.empty((v_num, feat_dim))
@@ -81,6 +85,9 @@ def get_feat_dim(config: Config):
         return 128
     elif config.graph_name == "products":
         return 100
+    else:
+        print("Invalid graph name", config.graph_name)
+        exit(-1)
 
 def get_feat_bytes(feat:torch.Tensor):
     res = feat.element_size()
@@ -105,7 +112,7 @@ def load_data(config: Config, is_pinned=False):
     feat = None
     label = None
     num_label = None
-    if config.graph_name in ["products"]:
+    if config.graph_name in ["products"]: # also supports papers100M
         feat, label, num_label = load_feat_label(os.path.join(config.data_dir, config.graph_name))
     else:
         v_num = graph.num_nodes()
@@ -114,6 +121,7 @@ def load_data(config: Config, is_pinned=False):
         num_label = 10
         label = gen_rand_label(v_num, 10)
         
+    config.in_feat = feat.shape[1]
     print(f"Data loading total time {t1.duration()} secs")
     
     if is_pinned:
