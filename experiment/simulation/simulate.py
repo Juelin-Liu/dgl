@@ -37,10 +37,6 @@ def _simulate(rank: int, config: Config, graph: dgl.DGLGraph, train_idx: torch.T
     
     print(f"sampling on device: {device}", flush=True)        
     timer = Timer()
-    epoch_num = config.num_epoch
-    
-    v_num = graph.num_nodes()
-    e_num = graph.num_edges()
     
     src_node_cnts = []
     dst_node_cnts = []

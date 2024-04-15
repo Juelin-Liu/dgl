@@ -5,6 +5,8 @@ echo "CUDA_HOME=$CUDA_HOME"
 
 bash init.sh
 
+rm -rf build
+
 cmake -B build -GNinja
 
 cmake --build build -j

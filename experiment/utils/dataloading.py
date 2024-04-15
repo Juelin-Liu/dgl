@@ -9,6 +9,10 @@ import numpy as np
 def load_numpy(path):
     return torch.from_numpy(np.load(path))
 
+def save_numpy(out:torch.Tensor, outpath: str):
+    assert(outpath.endswith(".npy"))
+    np.save(outpath, out.numpy(force=True))
+    
 def load_graph(in_dir, is32=False, wsloop=False, is_sym=False, load_edge_weight=False) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     symtype_str = "sym" if is_sym else "xsym"
     indptr = load_numpy(os.path.join(in_dir, f"indptr_{symtype_str}.npy"))
