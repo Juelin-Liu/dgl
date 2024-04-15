@@ -95,20 +95,6 @@ The output should be something like `['/conda/lib/python3.10/site-packages/dgl']
 | [Graphs](https://spara-artifact.s3.us-east-2.amazonaws.com/dataset.tar.gz) | It contains graph topology, label, node and edge weights for produces, paper100M, orkut and friendster. | 75GB | 144GB | \
 | [Partition Maps](https://spara-artifact.s3.us-east-2.amazonaws.com/partition_map.tar.gz) | Contains partition maps for produces, paper100M, orkut and friendster using different combination of nodes and edge weights | 1GB | 4.1GB |
 
-You can use the following script to download the dataset and save it to `./dataset` directory.
-
-```bash
-dataset_dir=${PWD}/dataset
-mkdir -p $dataset_dir
-pushd $dataset_dir
-wget https://spara-artifact.s3.us-east-2.amazonaws.com/partition_map.tar.gz
-tar -xvf partition_map.tar.gz && mv numpy partition_map
-
-wget https://spara-artifact.s3.us-east-2.amazonaws.com/dataset.tar.gz
-tar -xvf dataset.tar.gz && mv numpy graph
-rm *.tar.gz
-popd
-```
-After executing the following script the graph topology data will be in `./dataset/graph` directory whereas the partition maps will be inside `./dataset/partition_map` directory.
+You can use the `download.sh` script to download the dataset and save it to `./dataset` directory. The graph topology data will be in `./dataset/graph` directory whereas the partition maps will be inside `./dataset/partition_map` directory.
 
 # Run Experiments
