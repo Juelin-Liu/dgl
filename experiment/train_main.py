@@ -13,7 +13,6 @@ if __name__ == "__main__":
     bal = args.bal
     system = args.system
     sample_mode = args.sample_mode
-    partition_type = get_partition_type(nmode, emode, bal)
     world_size = args.world_size
     model = args.model
     cache_size = args.cache_size
@@ -24,7 +23,7 @@ if __name__ == "__main__":
         fanouts[idx] = int(fanout)
     dir_path = os.path.dirname(os.path.realpath(__file__))
     log_path = os.path.join(dir_path, "logs/exp.csv")
-    config = Config(graph_name=graph_name,
+    cfg = Config(graph_name=graph_name,
                     world_size=world_size,
                     num_partition=world_size,
                     num_epoch=num_epoch,
@@ -37,18 +36,18 @@ if __name__ == "__main__":
                     log_path=log_path,
                     data_dir=data_dir,
                     nvlink=False,
-                    partition_type=partition_type,
+                    partition_type=get_partition_type(nmode, emode, bal),
                     sample_mode=sample_mode)
-    if config.system == "split":
+    if cfg.system == "split":
         from nodepred.trainer import bench_split
-        bench_split(config)
-    elif config.system == "dgl":
+        bench_split(cfg)
+    elif cfg.system == "dgl":
         from nodepred.trainer import bench_dgl_batch
-        bench_dgl_batch([config])
-    elif config.system == "quiver":
+        bench_dgl_batch([cfg])
+    elif cfg.system == "quiver":
         from nodepred.quiver_trainer import bench_quiver_batch
-        bench_quiver_batch([config])
-    elif config.system == "p3":
+        bench_quiver_batch([cfg])
+    elif cfg.system == "p3":
         from nodepred.p3_trainer import bench_p3_batch
-        bench_p3_batch([config])
+        bench_p3_batch([cfg])
 

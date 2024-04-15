@@ -17,7 +17,6 @@ if __name__ == "__main__":
     bal = args.bal
     system = args.system
     sample_mode = args.sample_mode
-    partition_type = get_partition_type(nmode, emode, bal)
     world_size = args.world_size
     fanouts = args.fanouts.split(',')
     for idx, fanout in enumerate(fanouts):
@@ -25,7 +24,7 @@ if __name__ == "__main__":
     dir_path = os.path.dirname(os.path.realpath(__file__))
     log_path = os.path.join(dir_path, "logs/exp.csv")
     
-    config = Config(graph_name=graph_name,
+    cfg = Config(graph_name=graph_name,
                     world_size=world_size,
                     num_partition=world_size,
                     num_epoch=num_epoch,
@@ -38,12 +37,12 @@ if __name__ == "__main__":
                     log_path=log_path,
                     data_dir=data_dir,
                     nvlink=False,
-                    partition_type=partition_type,
+                    partition_type=get_partition_type(nmode, emode, bal),
                     sample_mode=sample_mode)
 
-    if config.system == "split":
+    if cfg.system == "split":
         from sample.split_sample import split_sample
-        split_sample(config)
-    elif config.system == "dgl":
+        split_sample(cfg)
+    elif cfg.system == "dgl":
         from sample.dgl_sample import dgl_sample
-        dgl_sample(config)
+        dgl_sample(cfg)

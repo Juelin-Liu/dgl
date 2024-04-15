@@ -7,39 +7,33 @@ from torch.multiprocessing import spawn
 from utils import *
 from dgl.dev.dataloader import *
 
-def simulate(config: Config, node_mode: str, edge_mode: str, bal: str):
-    graph, train_idx, valid_idx, test_idx = load_topo(config, is_pinned=True)
+def simulate(config: Config):
+    graph, train_idx, _, _ = load_topo(config, is_pinned=True)
     partition_map = None
-    if node_mode != "random":
-        partition_map = load_partition_map(config, node_mode, edge_mode, bal)
+    if not "random" in config.partition_type:
+        partition_map = load_partition_map(config)
     else:
         print(f"using random with {config.num_partition} partitions")
         v_num = graph.num_nodes()
         partition_map = torch.randint(low=0, high=config.num_partition, size=(v_num,), dtype=torch.uint8)
     try:
-        spawn(_simulate, args=(config, graph, train_idx, partition_map, node_mode, edge_mode, bal), nprocs=config.world_size)
+        spawn(_simulate, args=(config, graph, train_idx, partition_map), nprocs=config.world_size)
     except Exception as e:
         print(f"error encountered with {config=}:", e)
         exit(-1)
             
-def _simulate(rank: int, config: Config, graph: dgl.DGLGraph, train_idx: torch.Tensor, partition_map: torch.Tensor, node_mode: str, edge_mode: str, bal: str):
+def _simulate(rank: int, config: Config, graph: dgl.DGLGraph, train_idx: torch.Tensor, partition_map: torch.Tensor):
     ddp_setup(rank, config.world_size)
     device = torch.cuda.current_device()
     partition_map = partition_map.to(device)
     e2eTimer = Timer()
     if rank == 0:
         print(config)
-    mode = "uva"
-    if "friendster" in config.graph_name:
-        graph = graph.pin_memory_()
-        mode = "uva"
-    else:
-        graph = graph.to(rank)
-        mode = "gpu"
-    sample_config = SampleConfig(rank=rank, num_partition=config.num_partition, batch_size=config.batch_size * config.world_size, world_size=config.world_size, mode=mode, fanouts=config.fanouts, reindex=False, drop_last=True)
+    
+    sample_config = SampleConfig(rank=rank, batch_size=config.batch_size, world_size=config.world_size, mode=config.sample_mode, fanouts=config.fanouts)
     dataloader = GraphDataloader(graph, train_idx, sample_config)
+    step_per_epoch = dataloader.max_step_per_epoch
     step = 0
-    step_per_epoch = dataloader.target_idx.shape[0] // dataloader.batch_size + 1
     
     print(f"sampling on device: {device}", flush=True)        
     timer = Timer()
@@ -127,6 +121,6 @@ def _simulate(rank: int, config: Config, graph: dgl.DGLGraph, train_idx: torch.T
             "crs": all_crs
         }
         
-        file_name = f"{config.graph_name}_w{config.world_size}_n{node_mode}_e{edge_mode}_{bal}.pt"
+        file_name = f"{config.graph_name}_w{config.world_size}_{config.partition_type}.pt"
         torch.save(state, os.path.join(out_dir,file_name))
     ddp_exit()
