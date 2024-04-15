@@ -18,11 +18,11 @@ if __name__ == "__main__":
     cache_size = args.cache_size
     hid_size = args.hid_size
     fanouts = args.fanouts.split(',')
-    
+    log_file=args.log_file 
     for idx, fanout in enumerate(fanouts):
         fanouts[idx] = int(fanout)
     dir_path = os.path.dirname(os.path.realpath(__file__))
-    log_path = os.path.join(dir_path, "logs/exp.csv")
+    log_path = os.path.join(dir_path, "logs/{log_file}")
     cfg = Config(graph_name=graph_name,
                     world_size=world_size,
                     num_partition=world_size,

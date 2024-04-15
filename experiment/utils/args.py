@@ -16,6 +16,7 @@ def get_args():
     parser.add_argument('--nmode', default="dst", type=str, help="Node weight configuraion", choices=["uniform", "degree", "src", "dst", "input", "random"] )
     parser.add_argument('--emode', default="freq", type=str, help="Edge weight configuraion", choices=["uniform", "freq", "random"])
     parser.add_argument('--bal', default="xbal", type=str, help='Balance target idx on each partition or not', choices=["bal", "xbal"])
+    parser.add_argument('--log_file',default='exp.csv',type=str,help='output log file')
     return parser.parse_args()
 
 def get_partition_type(nmode, emode, bal):
