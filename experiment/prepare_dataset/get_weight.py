@@ -34,10 +34,10 @@ def _freq(rank: int, config: Config, graph: dgl.DGLGraph, train_idx: torch.Tenso
     print(f"sampling on device: {device}")        
     timer = Timer()
     epoch_num = config.num_epoch
-    min_epoch_num = 1500 // step_per_epoch + 1
-    # max_epoch_num = 50000 // step_per_epoch + 1
+    min_epoch_num = 2000 // step_per_epoch + 1
+    max_epoch_num = 50000 // step_per_epoch + 1
     epoch_num = max(min_epoch_num, epoch_num)
-    # epoch_num = min(epoch_num, max_epoch_num)
+    epoch_num = min(epoch_num, max_epoch_num)
     v_num = graph.num_nodes()
     e_num = graph.num_edges()
     
@@ -69,6 +69,10 @@ def _freq(rank: int, config: Config, graph: dgl.DGLGraph, train_idx: torch.Tenso
     
     if rank == 0:
         out_dir = os.path.join(config.data_dir, config.graph_name)
+        input_node_weight = input_node_weight.cpu() // epoch_num
+        src_node_weight = src_node_weight.cpu() // epoch_num
+        dst_node_weight = dst_node_weight.cpu() // epoch_num
+        edge_weight = edge_weight.cpu() // epoch_num
         print("saving to", out_dir)
         save_numpy(input_node_weight.type(torch.int64), f"{out_dir}/input_node_weight.npy")
         save_numpy(src_node_weight.type(torch.int64), f"{out_dir}/src_node_weight.npy")

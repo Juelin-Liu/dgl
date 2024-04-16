@@ -106,14 +106,13 @@ def load_metis_graph(config:Config, node_mode: str, edge_mode: str):
     print(f"load graph topology in {timer.duration()} secs", flush=True)
     timer.reset()
     degree = indptr[1:] - indptr[:-1]
-    
+    avg_deg = torch.sum(degree) // degree.shape[0]
     edge_pruned = False
     if load_edge_weight:
         # print("prunning edges")
         flag = edge_weight > 0
         remain_ratio = flag.sum() / flag.shape[0] * 100
         if remain_ratio < 50:
-            ed = False
             e_num = flag.sum()
             indices = indices[flag].clone()
             edge_weight = edge_weight[flag].clone()
@@ -149,8 +148,8 @@ def load_metis_graph(config:Config, node_mode: str, edge_mode: str):
         node_weight = degree
     elif node_mode in ["src", "dst", "input"]:
         node_weight = load_numpy(f"{in_dir}/{node_mode}_node_weight.npy")
-        node_weight = node_weight * 8 + 1
-    return node_weight.type(torch.int64), indptr, indices, edge_weight
+        node_weight = node_weight * avg_deg + 1
+    return node_weight, indptr, indices, edge_weight
 
 def partition(config: Config, node_mode:str, edge_mode:str, bal: str):
     assert node_mode in ["uniform", "degree", "src", "dst", "input"]    
@@ -182,7 +181,7 @@ def partition(config: Config, node_mode:str, edge_mode:str, bal: str):
     out_dir = os.path.join(config.data_dir, "partition_map", config.graph_name)
     os.makedirs(out_dir, exist_ok=True)
     print(f"saving file to {out_dir}/{file_name}", flush=True)
-    save_numpy(assignment.type(torch.int8), os.path.join(out_dir, file_name))
+    save_numpy(assignment, os.path.join(out_dir, file_name))
     # torch.save(assignment, os.path.join(out_dir, file_name))
 
 # def partition(config: Config, node_mode:str, edge_mode:str, bal: str):
@@ -233,7 +232,9 @@ if __name__ == "__main__":
     node_weight = args.node_weight
     edge_weight = args.edge_weight
     num_partition = args.num_partition
-
+    if "random" in node_weight:
+        print("skip random")
+        exit(0)
     batch_size = 0
     fanouts = [0]
     num_epoch = 0

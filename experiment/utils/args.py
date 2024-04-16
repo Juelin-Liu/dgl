@@ -13,6 +13,7 @@ def get_args():
     parser.add_argument('--cache_size', default="0GB", type=str, help="Feature data cache size")
     parser.add_argument('--sample_mode', default="uva", type=str, help="Sample mode", choices=["uva", "gpu"])
     parser.add_argument('--world_size', default=4, type=int, help='Number of GPUs')
+    parser.add_argument('--num_partition', default=4, type=int, help='Number of partitions')
     parser.add_argument('--node_weight', default="dst", type=str, help="Node weight configuraion", choices=["uniform", "degree", "src", "dst", "input", "random"] )
     parser.add_argument('--edge_weight', default="freq", type=str, help="Edge weight configuraion", choices=["uniform", "freq", "random"])
     parser.add_argument('--bal', default="xbal", type=str, help='Balance target idx on each partition or not', choices=["bal", "xbal"])

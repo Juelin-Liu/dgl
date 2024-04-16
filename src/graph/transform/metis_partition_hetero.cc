@@ -68,7 +68,7 @@ IdArray MetisPartition(
   options[METIS_OPTION_ONDISK] = 1;
   options[METIS_OPTION_NITER] = 1;
   options[METIS_OPTION_NIPARTS] = 1;
-  options[METIS_OPTION_DROPEDGES] = 1;
+  options[METIS_OPTION_DROPEDGES] = ewgt == nullptr;
 
   if (obj_cut) {
     options[METIS_OPTION_OBJTYPE] = METIS_OBJTYPE_CUT;

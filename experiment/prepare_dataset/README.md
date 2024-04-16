@@ -1,5 +1,5 @@
 # How to Prepare Dataset
-The following instructions will download the datasets from their original URLs and convert them into NumPy format. 
+The following instructions will download the datasets from their original URLs and convert them into NumPy format.
 Guidance on how to generate node/edge weights for Metis partitioning is also provided.
 
 ## Download Raw Dataset from SNAP
@@ -7,18 +7,20 @@ Guidance on how to generate node/edge weights for Metis partitioning is also pro
 sudo apt install aria2 -y
 ./download.sh
 ```
-The download script will download and extract the raw data in `../../dataset/raw` directory.
+The download script will download and extract the raw data in `../../dataset/graph` directory.
+You can change the download path by modifying the `data_dir` variable in [`env.sh`](../scripts/env.sh).
+It will also convert graph into NumPy format and compute weights for node and edges.
 
-## Convert Datasets to Numpy Format
+### Convert Datasets to Numpy Format (Included in `download.sh`)
 ```bash
-python3 get_npgraph.py --data_dir=../../dataset/raw --graph_name=products
+python3 get_npgraph.py --data_dir=../../dataset/graph --graph_name=products
 ```
 This script will convert the graph to the NumPy format and generate the train, valid, test index split.
 
-## Generate Frequency Weight
+### Generate Frequency Weight  (Included in `download.sh`)
 For example, to generate node and edge weights for products, run:
 ```bash
-python3 get_weight.py --data_dir=../../dataset/raw --graph_name=products
+python3 get_weight.py --data_dir=../../dataset/graph --graph_name=products
 ```
 ## Generate Partition Maps
 For detailed usage:
@@ -50,10 +52,15 @@ It has six input parameters:
 
 Example usage:
 ```bash
-python3 get_partition.py --num_partition=4 --graph_name=products --data_dir=../../dataset/raw --node_mode=dst --edge_mode=freq --bal=xbal
+python3 get_partition.py --num_partition=4 --graph_name=products --data_dir=../../dataset/graph --node_mode=dst --edge_mode=freq --bal=xbal
 ```
-The result will be saved to `../../dataset/raw/products/products_w4_ndst_efreq_xbal.npy`.
 
-Notice that this step might take several days for large graphs like Papers100M and Friendster. We provide preprocessed partition maps for all the tested graphs. 
+The result will be saved to `../../dataset/graph/products/products_w4_ndst_efreq_xbal.npy`.
+
+We also provide a script to generate all partition maps used in the experiments.
+```bash
+nohup bash partition.sh &
+```
+Notice that this step might take several days for large graphs like Papers100M and Friendster. 
 
 Alternatively, you can refer to this [repo](https://github.com/Juelin-Liu/npmetis) for a multi-thread / distributed version of Metis.

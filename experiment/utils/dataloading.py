@@ -53,7 +53,7 @@ def load_feat_label(in_dir) -> tuple[torch.Tensor, torch.Tensor, int]:
 def load_partition_map(config: Config):
     in_dir = os.path.join(config.data_dir, "partition_map", config.graph_name)
     file_name = f"{config.graph_name}_w{config.num_partition}_{config.partition_type}.npy"
-    return load_numpy(os.path.join(in_dir, file_name)).type(torch.int8)
+    return load_numpy(os.path.join(in_dir, file_name)).type(torch.uint8)
 
 def gen_rand_feat(v_num, feat_dim):
     return torch.empty((v_num, feat_dim))

@@ -12,10 +12,13 @@ def simulate(config: Config):
     partition_map = None
     if not "random" in config.partition_type:
         partition_map = load_partition_map(config)
+        assert(partition_map.max() == config.world_size - 1)
+        print(f"load partition map {config.partition_type}:", partition_map, torch.bincount(partition_map))
     else:
         print(f"using random with {config.num_partition} partitions")
         v_num = graph.num_nodes()
         partition_map = torch.randint(low=0, high=config.num_partition, size=(v_num,), dtype=torch.uint8)
+        print(f"load partition map {config.partition_type}:", partition_map, torch.bincount(partition_map))
     try:
         spawn(_simulate, args=(config, graph, train_idx, partition_map), nprocs=config.world_size)
     except Exception as e:
@@ -29,7 +32,7 @@ def _simulate(rank: int, config: Config, graph: dgl.DGLGraph, train_idx: torch.T
     e2eTimer = Timer()
     if rank == 0:
         print(config)
-    sample_config = SampleConfig(rank=rank, batch_size=config.batch_size, world_size=config.world_size, mode=config.sample_mode, fanouts=config.fanouts)
+    sample_config = SampleConfig(rank=rank, batch_size=config.batch_size, world_size=config.world_size, mode=config.sample_mode, reindex=False, fanouts=config.fanouts)
     dataloader = GraphDataloader(graph, train_idx, sample_config)
     step_per_epoch = dataloader.max_step_per_epoch
     step = 0
@@ -48,12 +51,17 @@ def _simulate(rank: int, config: Config, graph: dgl.DGLGraph, train_idx: torch.T
         dst_partition = mapping[dst]
         loc_mask = src_partition == dst_partition
         crs_mask = src_partition != dst_partition
-        loc_cnts = torch.bincount(mapping[src[loc_mask]], minlength=config.world_size) # use the src/s partition id to map the local edge (identical)
-        crs_cnts = torch.bincount(mapping[src[crs_mask]], minlength=config.world_size) # use the dst's partition id to map the cross edge (subject to change)
+        loc_cnts = torch.bincount(mapping[src[loc_mask]], minlength=config.num_partition) # use the src/s partition id to map the local edge (identical)
+        crs_cnts = torch.bincount(mapping[src[crs_mask]], minlength=config.num_partition) # use the dst's partition id to map the cross edge (subject to change)
+        
+        # if rank == 0:
+        #     print(f"{src=} {dst=}")
+        #     print(f"{src_partition=} {dst_partition=}")
+
         return loc_cnts, crs_cnts
     
     def get_node_cnts(nodes, mapping):
-        return torch.bincount(mapping[nodes], minlength=config.world_size)
+        return torch.bincount(mapping[nodes], minlength=config.num_partition)
     
     def lst_to_tensor(lst):
         return torch.stack(lst)
@@ -117,5 +125,5 @@ def _simulate(rank: int, config: Config, graph: dgl.DGLGraph, train_idx: torch.T
         }
         
         file_name = f"{config.graph_name}_w{config.world_size}_{config.partition_type}.pt"
-        torch.save(state, os.path.join(out_dir,file_name))
+        torch.save(state, os.path.join(out_dir, file_name))
     ddp_exit()
