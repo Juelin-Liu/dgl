@@ -1,6 +1,6 @@
 # How to Prepare Dataset
-The following instructions will download the datasets from their original urls and convert them into NumPy format. 
-Guidance on how to generate node / edge weights for Metis partitioning is also provided.
+The following instructions will download the datasets from their original URLs and convert them into NumPy format. 
+Guidance on how to generate node/edge weights for Metis partitioning is also provided.
 
 ## Download Raw Dataset from SNAP
 ```bash
