@@ -26,14 +26,14 @@ For detailed usage:
 python3 get_partition.py --help
 ```
 
-There are six input parameters:
+It has six input parameters:
 `--graph_name`: input graph name
 
 `--data_dir`: input data directory
 
 `--num_partition`: number of partitions in the result
 
-`--node_mode`: weights assigned to each node. Valid options include: `[uniform,degree,src,dst,input]`.
+`--node_weight`: weights assigned to each node. Valid options include: `[uniform,degree,src,dst,input]`.
 1. `uniform`: each node has the same weight 1.
 2. `degree`: each node has a weight equal to its degree.
 3. `src`: each node has a weight equal to the number of times it is sampled as a source node during `get_weight.py`.
@@ -43,7 +43,10 @@ There are six input parameters:
 `--edge_weight`: weights assigned to each edge. Valid options include: `[uniform,freq]`.
 1. `uniform`: each edge has the same weight 1.
 2. `freq`: each node has a weight equal to the number of times it is sampled during `get_weight.py`.
+
 `--bal`: balance train, valid, test splits or not. Valid options include: `[bal,xbal]`.
+1. `bal`: balance train, valid, test splits.
+2. `xbal`: do not balance train, valid, test splits.
 
 Example usage:
 ```bash

@@ -29,7 +29,6 @@ def _simulate(rank: int, config: Config, graph: dgl.DGLGraph, train_idx: torch.T
     e2eTimer = Timer()
     if rank == 0:
         print(config)
-    
     sample_config = SampleConfig(rank=rank, batch_size=config.batch_size, world_size=config.world_size, mode=config.sample_mode, fanouts=config.fanouts)
     dataloader = GraphDataloader(graph, train_idx, sample_config)
     step_per_epoch = dataloader.max_step_per_epoch

@@ -79,7 +79,7 @@ def plots(name2workload, mode, outpath=None):
     
     for pname, workload in name2workload.items():
         
-        world_size, vmode, emode, bal = pname.split("_")
+        world_size, vmode, edge_weight, bal = pname.split("_")
 
         def slice_row(row:torch.Tensor,start:int, step:int):
             return row[start:row.shape[0]:step]
@@ -95,8 +95,8 @@ def plots(name2workload, mode, outpath=None):
         timax, timax_idx = torch.max(tinput, dim=1)
         tcsum = torch.sum(tcrs, dim=1)
         
-        label = get_label(vmode, emode, bal)
-        color = get_color(vmode, emode, bal)
+        label = get_label(vmode, edge_weight, bal)
+        color = get_color(vmode, edge_weight, bal)
         
         if mode == "edge":
             x = tsmax / torch.sum(tsum, dim=1) * 4

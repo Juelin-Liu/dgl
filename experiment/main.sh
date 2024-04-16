@@ -1,4 +1,9 @@
 #!/bin/bash
+graph=papers100M
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+data_dir=$SCRIPT_DIR/../../graph/
+echo "Data directory: $data_dir"
+
 for graph in products papers100M orkut friendster; do
   for model in sage gat; do
     for system in split dgl quiver dist_cache p3; do
@@ -12,7 +17,7 @@ for graph in products papers100M orkut friendster; do
       fi
       for cache_size in ${cache_sizes[@]}; do
         export PYTHONPATH=$PYTHONPATH
-        echo python3 train_main.py --system=${system} --model=${model} --fanout="15,15,15" --graph=${graph} --world_size=${world_size} --data_dir=/data/gsplit --cache_size=${cache_size} --batch_size=${batch_size} --log_file=main.csv
+        echo python3 train_main.py --system=${system} --model=${model} --fanout="15,15,15" --graph=${graph} --world_size=${world_size} --data_dir=${data_dir} --cache_size=${cache_size} --batch_size=${batch_size} --log_file=main.csv
         unset PYTHONPATH
       done
     done

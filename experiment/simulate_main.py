@@ -23,8 +23,8 @@ if __name__ == "__main__":
     data_dir = args.data_dir
     batch_size = args.batch_size
     num_epoch = args.num_epoch
-    nmode = args.nmode
-    emode = args.emode
+    node_weight = args.node_weight
+    edge_weight = args.edge_weight
     bal = args.bal
     system = args.system
     sample_mode = args.sample_mode
@@ -51,7 +51,7 @@ if __name__ == "__main__":
                     log_path=log_path,
                     data_dir=data_dir,
                     nvlink=False,
-                    partition_type=get_partition_type(nmode, emode, bal),
+                    partition_type=get_partition_type(node_weight, edge_weight, bal),
                     sample_mode=sample_mode)
            
     simulate(cfg)

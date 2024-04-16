@@ -217,8 +217,8 @@ def get_args():
     parser.add_argument('--graph_name', default="products", type=str, help="Input graph name", choices=["products", "papers100M", "orkut", "friendster"])
     parser.add_argument('--data_dir', required=True, type=str, help="Input graph directory")
     parser.add_argument('--num_partition', default=4, type=int, help='Number of partitions')
-    parser.add_argument('--node_mode', default="uniform", type=str, help="Node weight configuraion", choices=["uniform", "degree", "src", "dst", "input"] )
-    parser.add_argument('--edge_mode', default="uniform", type=str, help="Edge weight configuraion", choices=["uniform", "freq"])
+    parser.add_argument('--node_weight', default="uniform", type=str, help="Node weight configuraion", choices=["uniform", "degree", "src", "dst", "input"] )
+    parser.add_argument('--edge_weight', default="uniform", type=str, help="Edge weight configuraion", choices=["uniform", "freq"])
     parser.add_argument('--bal', default="bal", type=str, help='Balance target idx on each partition or not', choices=["bal", "xbal"])
     return parser.parse_args()
 
@@ -230,8 +230,8 @@ if __name__ == "__main__":
     graph_name = str(args.graph_name)
     data_dir = args.data_dir
     bal = args.bal
-    node_mode = args.node_mode
-    edge_mode = args.edge_mode
+    node_weight = args.node_weight
+    edge_weight = args.edge_weight
     num_partition = args.num_partition
 
     batch_size = 0
@@ -252,6 +252,6 @@ if __name__ == "__main__":
                        hid_size=256,
                        log_path=log_path,
                        data_dir=data_dir,
-                       partition_type=get_partition_type(nmode=node_mode, emode=edge_mode, bal=bal))
+                       partition_type=get_partition_type(node_weight=node_weight, edge_weight=edge_weight, bal=bal))
            
-    partition(config, node_mode, edge_mode, bal)
+    partition(config, node_weight, edge_weight, bal)
