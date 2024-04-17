@@ -49,7 +49,9 @@ sudo docker build -t spara:latest .
 ## Run the docker image
 
 ```bash
-sudo docker run --gpus --shm-size=180GB all -it spara:latest
+$sudo docker run --shm-size=180GB --gpus all -itd spara:latest
+<container_id>
+$sudo docker exec -it <container_id> /bin/bash
 ```
 
 # Option 2: Not Using Docker 
