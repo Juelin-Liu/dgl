@@ -105,7 +105,56 @@ You can use the `download.sh` script to download the dataset and save it to `./d
 You can change the `dataset_dir` variable inside the [`env.sh`](./experiment/script/env.sh) script to change the default downloading folder. 
 (Notice that the `partition_map` directory must be inside `graph` directory so the dataloading function can find the maps correctly.)
 
-# Run Experiments
+# Artifact Execution
+
+<ul>
+<li>S1 The first step is to obtain the input datasets, which
+include the graph topology data and partition maps. We
+provide pre-processed datasets that can be downloaded
+from Amazon S3. The script download.sh can be used
+to download those files automatically. Alternatively, you
+can use scripts in the repository to generate the prepared
+datasets. Notice that this would take several days. </li>
+<li>S2 After obtaining the prepared datasets, you can run
+the main experiment running the bash scripts experi-
+ment/script/main.sh. This script runs all the baselines and
+generates the log file. (Expected time: 120 min, depends
+on S1.)</li>
+<li>S3 Postprocess the logs from S2. Generate Figures 3 using
+the notebook plot/time breakdown. (depends on S2). </li>
+<li>S4 Postprocess the logs from S2 using the notebook
+plot/main to generate Table 3. (depends on S2). </li>
+<li> S5 Run the sampling simulation
+experiment/sample main, to generate the varying
+edges computed and features loaded for varying batch
+sizes and graphs to generate the datapoints in table 1.
+(Expected time: 30min, depends on S1) </li>
+<li> S6 Run the script experiment/scripts/ablation.sh to run
+all the ablation experiments on papers graph. (depends
+on S1</li>
+<li>S7 Postproces the logs generated in the previous step with
+the jupyter notebook plot/final_ablation (Expected
+time: 3 hours, depends on S6) </li>
+<li> S8 : Run the python file experiment/simulate main for
+the friendster and various partitioning schemes to collect
+the workload characteristics. (command line arguments
+details provided in the README).(depends on S1) </li>
+<li> S9 : Post process the workloads generated in step S8 with
+the notebook plot/simulation plot to generate Figures
+5 </li>
+<li> S10 : Run the script experiment/partition ablation to col-
+lect the training logs for varying partitioning strategies.
+(depends S1) </li>
+<li> S11 : Run the notebook plot/partitioning to generate table
+4 from the training logs. (depends on S10) </li>
+</ul>
+
+
+
+
+
+
+
 ## Experiment Result Generation
 
 ## Data Analysis and Visualization
