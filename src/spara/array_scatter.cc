@@ -20,7 +20,7 @@ using namespace runtime;
 
 #define ATEN_PIDX_TYPE_SWITCH(val, PIDType, ...)                             \
   do {                                                                       \
-    CHECK_EQ((val).code, kDGLInt) << "ID must be integer type";              \
+    CHECK_LT((val).code, kDGLFloat) << "ID must be integer type";              \
     if ((val).bits == 8) {                                                   \
       typedef int8_t PIDType;                                                \
       { __VA_ARGS__ }                                                        \

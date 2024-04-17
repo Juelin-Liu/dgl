@@ -22,7 +22,7 @@ if __name__ == "__main__":
     for idx, fanout in enumerate(fanouts):
         fanouts[idx] = int(fanout)
     dir_path = os.path.dirname(os.path.realpath(__file__))
-    log_path = os.path.join(dir_path, "logs/{log_file}")
+    log_path = os.path.join(dir_path, f"logs/{log_file}")
     cfg = Config(graph_name=graph_name,
                     world_size=world_size,
                     num_partition=world_size,
@@ -45,6 +45,9 @@ if __name__ == "__main__":
         from nodepred.trainer import bench_dgl_batch
         bench_dgl_batch([cfg])
     elif cfg.system == "quiver":
+        from nodepred.quiver_trainer import bench_quiver_batch
+        bench_quiver_batch([cfg])
+    elif cfg.system == "dist_cache":
         from nodepred.quiver_trainer import bench_quiver_batch
         bench_quiver_batch([cfg])
     elif cfg.system == "p3":
