@@ -1,8 +1,11 @@
 #!/bin/bash
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-source "${SCRIPT_DIR}/../script/env.sh"
-python_dir=$SCRIPT_DIR
+CUR_DIR=$SCRIPT_DIR
+
+source "${CUR_DIR}/../script/env.sh"
+
+python_dir=$CUR_DIR
 
 for graph_name in products papers100M orkut friendster; do
     for node_weight in uniform degree; do #dst src input
