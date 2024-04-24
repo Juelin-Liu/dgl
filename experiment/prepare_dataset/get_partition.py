@@ -117,6 +117,7 @@ def load_metis_graph(config:Config, node_mode: str, edge_mode: str):
             indices = indices[flag].clone()
             edge_weight = edge_weight[flag].clone()
             indptr = CompactCSR(indptr, flag)
+            edge_pruned=True
             print(f"remove {round(100 - remain_ratio.item())}% edges in {timer.duration()} secs", flush=True)
         else:
             if edge_weight.min() == 0:
