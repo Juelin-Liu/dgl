@@ -40,13 +40,13 @@ class Config:
     def header(self):
         return ["timestamp","machine_name", "graph_name", "feat_width", "world_size", "num_partition", "num_epoch", "fanouts", "num_redundant_layers", \
                 "batch_size", "system", \
-                    "model", "hid_size", "cache_size", "partition_type"]
+                    "model", "hid_size", "cache_size", "partition_type","sample_mode"]
     
     def content(self):
         connection = "_nvlink" if self.nvlink else "_pcie"
         machine_name = self.machine_name + connection
         return [pd.Timestamp('now'), machine_name, self.graph_name, self.in_feat, self.world_size, self.num_partition, self.num_epoch, self.fanouts, self.num_redundant_layer, \
-                    self.batch_size, self.system, self.model, self.hid_size, self.cache_size, self.partition_type]
+                    self.batch_size, self.system, self.model, self.hid_size, self.cache_size, self.partition_type, self.sample_mode]
 
     def __repr__(self):
         res = ""

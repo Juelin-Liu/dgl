@@ -36,7 +36,7 @@ def train_split_ddp(rank: int, config: Config, unique_id,
     device = torch.cuda.current_device()
     if rank == 0:
         print(config)
-    mode = "uva"
+    mode = config.sample_mode
     graph = graph.pin_memory_()
     feat_handle  = pin_memory_inplace(feat)
     label = label.to(device)
