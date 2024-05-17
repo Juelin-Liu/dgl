@@ -42,7 +42,7 @@ def train_split_ddp(rank: int, config: Config, unique_id,
     label = label.to(device)
         
     assert(partition_map.shape[0] == graph.num_nodes())
-    
+   
     model = get_distributed_model(rank, config.world_size, config.num_redundant_layer, 
                                   config.model, feat.shape[1], len(config.fanouts), config.hid_size, config.num_classes)
     model = model.to(device)

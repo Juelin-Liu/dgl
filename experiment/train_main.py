@@ -23,6 +23,7 @@ if __name__ == "__main__":
         fanouts[idx] = int(fanout)
     dir_path = os.path.dirname(os.path.realpath(__file__))
     log_path = os.path.join(dir_path, f"logs/{log_file}")
+    partition_type=get_partition_type(node_weight, edge_weight, bal)
     cfg = Config(graph_name=graph_name,
                     world_size=world_size,
                     num_partition=world_size,
@@ -40,7 +41,8 @@ if __name__ == "__main__":
                     sample_mode=sample_mode,
                     num_nodes=args.num_nodes,
                     node_rank=args.node_rank)
-    if config.system == "split":
+    
+    if cfg.system == "split":
         from nodepred.trainer import bench_split
         bench_split(cfg)
     elif cfg.system == "dgl":

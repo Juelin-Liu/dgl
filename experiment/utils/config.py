@@ -48,7 +48,7 @@ class Config:
         connection = "_nvlink" if self.nvlink else "_pcie"
         machine_name = self.machine_name + connection
         return [pd.Timestamp('now'), machine_name, self.graph_name, self.in_feat,\
-                f"{self.world_size} * {self.num_nodes}", self.num_partition, self.num_epoch, self.fanouts, self.num_redundant_layer, \
+                f"{str(self.world_size)} * {str(self.num_nodes)}", self.num_partition, self.num_epoch, self.fanouts, self.num_redundant_layer, \
                     self.batch_size, self.system, self.model, self.hid_size, self.cache_size, self.partition_type]
 
     def __repr__(self):

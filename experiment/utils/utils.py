@@ -5,7 +5,6 @@ import torch.distributed as dist
 from .config import Config
 from .profiler import Profiler
 
-<<<<<<< HEAD
 def get_tensor_size(intensor: torch.Tensor):
     num_bytes = intensor.element_size() * intensor.nelement()
     return f"{round(num_bytes / 1e9, 1)}GB"

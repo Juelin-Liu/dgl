@@ -51,13 +51,14 @@ def load_feat_label(in_dir) -> tuple[torch.Tensor, torch.Tensor, int]:
 
 
 def load_partition_map(config: Config):
-    in_dir = os.path.join(config.data_dir, "partition_ids", config.graph_name)
-    file_name = f"{config.graph_name}_w{config.num_partition}_{config.partition_type}.pt"
+    in_dir = os.path.join(config.data_dir, "partition_map", config.graph_name)
+
+    file_name = f"{config.graph_name}_w{config.num_partition}_{config.partition_type}.npy"
     if config.num_partition != 2:
-        p_map = torch.load(os.path.join(in_dir, file_name)).type(torch.int8)
+        p_map = load_numpy(os.path.join(in_dir, file_name)).type(torch.int8)
     else:
-        file_name = f"{config.graph_name}_w4_{config.partition_type}.pt"
-        p_map = torch.load(os.path.join(in_dir, file_name)).type(torch.int8)
+        file_name = f"{config.graph_name}_w4_{config.partition_type}.npy"
+        p_map = load_numpy(os.path.join(in_dir, file_name)).type(torch.int8)
         p_map[p_map == 2] = 0
         p_map[p_map == 3] = 1
 
