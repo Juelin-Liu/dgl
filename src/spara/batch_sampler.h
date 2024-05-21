@@ -16,6 +16,7 @@
 #include "../runtime/cuda/cuda_common.h"
 #include "../runtime/cuda/cuda_hashtable.cuh"
 #include "cuda/batch_rowwise_sampling.cuh"
+#include "cuda/bitmap.h"
 #include "cuda/map_edges.cuh"
 
 namespace dgl::dev {
@@ -42,6 +43,7 @@ class BatchSampler {
   std::deque<std::shared_ptr<GraphBatch>> _batches;
   int64_t _pool_size{1};
   int64_t _next_id{0};
+  bool use_bitmap{false};
 
   // return the unique elements in the arr
   NDArray Unique(const std::vector<NDArray> &rows) {

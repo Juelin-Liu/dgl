@@ -32,7 +32,7 @@ def _simulate(rank: int, config: Config, graph: dgl.DGLGraph, train_idx: torch.T
     e2eTimer = Timer()
     if rank == 0:
         print(config)
-    sample_config = SampleConfig(rank=rank, batch_size=config.batch_size, world_size=config.world_size, mode=config.sample_mode, reindex=False, fanouts=config.fanouts)
+    sample_config = SampleConfig(rank=rank, batch_size=config.batch_size * config.world_size, world_size=config.world_size, mode=config.sample_mode, reindex=False, fanouts=config.fanouts)
     dataloader = GraphDataloader(graph, train_idx, sample_config)
     step_per_epoch = dataloader.max_step_per_epoch
     step = 0
@@ -51,8 +51,8 @@ def _simulate(rank: int, config: Config, graph: dgl.DGLGraph, train_idx: torch.T
         dst_partition = mapping[dst]
         loc_mask = src_partition == dst_partition
         crs_mask = src_partition != dst_partition
-        loc_cnts = torch.bincount(mapping[src[loc_mask]], minlength=config.num_partition) # use the src/s partition id to map the local edge (identical)
-        crs_cnts = torch.bincount(mapping[src[crs_mask]], minlength=config.num_partition) # use the dst's partition id to map the cross edge (subject to change)
+        loc_cnts = torch.bincount(mapping[dst[loc_mask]], minlength=config.num_partition) # use the dst's partition id to map the local edge (identical)
+        crs_cnts = torch.bincount(mapping[dst[crs_mask]], minlength=config.num_partition) # use the dst's partition id to map the cross edge (subject to change)
         
         # if rank == 0:
         #     print(f"{src=} {dst=}")
@@ -93,11 +93,11 @@ def _simulate(rank: int, config: Config, graph: dgl.DGLGraph, train_idx: torch.T
     loc_edge_cnts = lst_to_tensor(loc_edge_cnts)
     crs_edge_cnts = lst_to_tensor(crs_edge_cnts)
     
-    all_src = torch.zeros((src_node_cnts.shape[0] * config.world_size, config.world_size), device=rank, dtype=src_node_cnts.dtype)
-    all_dst = torch.zeros((src_node_cnts.shape[0] * config.world_size, config.world_size), device=rank, dtype=src_node_cnts.dtype)
-    all_loc = torch.zeros((src_node_cnts.shape[0] * config.world_size, config.world_size), device=rank, dtype=src_node_cnts.dtype)
-    all_crs = torch.zeros((src_node_cnts.shape[0] * config.world_size, config.world_size), device=rank, dtype=src_node_cnts.dtype)
-    all_input = torch.zeros((input_node_cnts.shape[0] * config.world_size, config.world_size), device=rank, dtype=input_node_cnts.dtype)
+    all_src = torch.zeros((src_node_cnts.shape[0] * config.world_size, config.num_partition), device=rank, dtype=src_node_cnts.dtype)
+    all_dst = torch.zeros((src_node_cnts.shape[0] * config.world_size, config.num_partition), device=rank, dtype=src_node_cnts.dtype)
+    all_loc = torch.zeros((src_node_cnts.shape[0] * config.world_size, config.num_partition), device=rank, dtype=src_node_cnts.dtype)
+    all_crs = torch.zeros((src_node_cnts.shape[0] * config.world_size, config.num_partition), device=rank, dtype=src_node_cnts.dtype)
+    all_input = torch.zeros((input_node_cnts.shape[0] * config.world_size, config.num_partition), device=rank, dtype=input_node_cnts.dtype)
     
     dist.all_gather_into_tensor(all_src, src_node_cnts)
     dist.all_gather_into_tensor(all_dst, dst_node_cnts)

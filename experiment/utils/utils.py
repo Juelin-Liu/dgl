@@ -9,10 +9,10 @@ def get_tensor_size(intensor: torch.Tensor):
     num_bytes = intensor.element_size() * intensor.nelement()
     return f"{round(num_bytes / 1e9, 1)}GB"
 
-def ddp_setup(rank, world_size):
+def ddp_setup(rank, world_size, backend="nccl"):
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "12355"
-    dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
+    dist.init_process_group(backend=backend, rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
 
 def ddp_exit():

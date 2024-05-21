@@ -75,6 +75,38 @@ class Sampler {
 
     void useBitmap(bool use_bitmap) {
       _use_bitmap = use_bitmap;
+      if (_ctx.device_id == 0) {
+        LOG(INFO) << "Set use bitmap flag to " << use_bitmap
+                  << "\nOnly use bitmap if you only need the sampled subgraph\nBitmap does not preserve the relative insertion order, leading to incorrect re-indexing results for inference and training";
+      }
+    }
+
+    // return the unique elements in the arr using Bitmap
+    // notice that this function does not preserve the relevant insert order
+    // which leads to incorrect reindexing results for inference and training
+    // it should only be used when you only need the sampled subgraph
+    NDArray getUniqueWithBitmap(const std::vector<NDArray> &rows) {
+      int64_t num_input = rows.at(0).NumElements();
+      auto ctx = rows.at(0)->ctx;
+      auto stream = runtime::getCurrentCUDAStream();
+      auto device = runtime::DeviceAPI::Get(ctx);
+      int64_t *d_num_item =
+          static_cast<int64_t *>(device->AllocWorkspace(ctx, sizeof(int64_t)));
+      auto bitmap = getStaticBitmap(_csc.indptr.NumElements() - 1, ctx);
+
+      ATEN_ID_TYPE_SWITCH(rows.at(0)->dtype, IdType, {
+        for (auto &row : rows) {
+          bitmap->flag(row.Ptr<IdType>(), row.NumElements());
+        }
+      });
+
+      int64_t h_num_item = bitmap->numItem();
+      NDArray unique = NDArray::Empty({h_num_item}, rows.at(0)->dtype, ctx);
+      ATEN_ID_TYPE_SWITCH(unique->dtype, IdType, {
+        int64_t num_unique = bitmap->unique(unique.Ptr<IdType>());
+        CHECK_EQ(h_num_item, num_unique);
+      });
+      return unique;
     }
 
   /*
@@ -94,7 +126,11 @@ class Sampler {
       aten::COOMatrix block = aten::CSRRowWiseSampling(
           _csc, frontier, fanout, aten::NullArray(), replace);
       blocks.push_back(block);
-      frontiers.push_back(getUnique({frontier, block.col}));
+      if (_use_bitmap) {
+        frontiers.push_back(getUniqueWithBitmap({frontier, block.col}));
+      } else {
+        frontiers.push_back(getUnique({frontier, block.col}));
+      }
     }
     int64_t batch_id = _next_id;
     _batch = std::make_shared<GraphBatch>(batch_id, frontiers, blocks);
@@ -109,7 +145,9 @@ class Sampler {
     CHECK_EQ(batch->_batch_id, batch_id) << "getBlock batch id " << batch_id
                  << " is not found in the pool";
     CHECK(batch->_blocks.size() == _fanouts.size());
+
     if (should_reindex && !batch->reindexed) {
+      CHECK(!_use_bitmap) << "Reindex only supports using hash map to get unique elements but bitmap was used";
       auto all_nodes = batch->_frontiers.at(_fanouts.size());
       ATEN_ID_TYPE_SWITCH(all_nodes->dtype, IdType, {
         int64_t num_input = all_nodes.NumElements();

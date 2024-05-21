@@ -44,6 +44,24 @@ constexpr int name = 1;
 using TensorDispatcher = dgl::runtime::TensorDispatcher;
 
 namespace dgl::dev {
+
+std::shared_ptr<DeviceBitmap> getStaticBitmap(int64_t num_elems, DGLContext ctx, int comp_ratio) {
+  static int64_t _num_elems{0};
+  static DGLContext  _ctx{};
+  static int _comp_ratio{0};
+  static std::shared_ptr<DeviceBitmap> bitmap;
+  if (_num_elems != num_elems || _ctx != ctx || _comp_ratio != comp_ratio) {
+    bitmap = std::make_shared<DeviceBitmap>(num_elems, ctx, comp_ratio);
+    _num_elems = num_elems;
+    _ctx = ctx;
+    _comp_ratio = comp_ratio;
+  } else {
+    bitmap->reset();
+  }
+  return bitmap;
+  //  return std::make_shared<DeviceBitmap>(num_elems, ctx, comp_ratio);
+};
+
 class DeviceBitIterator
     : public std::iterator<std::random_access_iterator_tag, bool> {
  private:

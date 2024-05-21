@@ -17,8 +17,8 @@ void Mask(NDArray& bitmap, NDArray row);
 template <DGLDeviceType XPU, typename IdType>
 NDArray Flagged(const NDArray& bitmap, DGLContext ctx);
 
-template <DGLDeviceType XPU, typename IdType>
-void Increment(NDArray& count, const NDArray& indices);
+// template <DGLDeviceType XPU, typename IdType>
+// void Increment(NDArray& count, const NDArray& indices);
 
 template <DGLDeviceType XPU, typename CounterType, typename IndexType>
 void Increment(NDArray& count, const NDArray& indices);

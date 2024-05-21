@@ -1,8 +1,7 @@
 #!/bin/bash
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-source "${SCRIPT_DIR}/../script/env.sh"
-python_dir=$SCRIPT_DIR
+WORK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+source "${WORK_DIR}/../script/env.sh"
 
 # Download Dataset
 mkdir -p $data_dir
@@ -31,7 +30,4 @@ for graph_name in products orkut papers100M friendster:; do
     python3 ${python_dir}/get_npgraph.py --data_dir=$data_dir --graph_name=$graph_name
 done
 
-# Get Weight
-for graph_name in products orkut papers100M friendster:; do
-    python3 ${python_dir}/get_weight.py --data_dir=$data_dir --graph_name=$graph_name
-done
+${WORK_DIR}/weight.sh

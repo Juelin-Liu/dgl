@@ -108,23 +108,7 @@ class DeviceBitmap {
 
 };  // DeviceBitmap
 
-static std::shared_ptr<DeviceBitmap> getStaticBitmap(int64_t num_elems, DGLContext ctx, int comp_ratio = 8) {
-  static int64_t _num_elems{0};
-  static DGLContext  _ctx{};
-  static int _comp_ratio{0};
-  static std::shared_ptr<DeviceBitmap> bitmap;
-  if (_num_elems != num_elems || _ctx != ctx || _comp_ratio != comp_ratio) {
-    bitmap = std::make_shared<DeviceBitmap>(num_elems, ctx, comp_ratio);
-    _num_elems = num_elems;
-    _ctx = ctx;
-    _comp_ratio = comp_ratio;
-  } else {
-    bitmap->reset();
-  }
-  return bitmap;
-//  return std::make_shared<DeviceBitmap>(num_elems, ctx, comp_ratio);
-};
-
+std::shared_ptr<DeviceBitmap> getStaticBitmap(int64_t num_elems, DGLContext ctx, int comp_ratio = 8);
 
 }  // namespace dgl::dev
 #endif  // DGL_BITMAP_H

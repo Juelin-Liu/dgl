@@ -23,7 +23,7 @@ if __name__ == "__main__":
     fanouts = args.fanouts.split(',')
 
     for idx, fanout in enumerate(fanouts):
-        fanouts[idx] = int(fanout)
+        fanouts[idx] = 20
     dir_path = os.path.dirname(os.path.realpath(__file__))
     log_path = os.path.join(dir_path, "logs/exp.csv")
     cfg = Config(graph_name=graph_name,

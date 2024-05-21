@@ -7,6 +7,24 @@
 #include "../graph/unit_graph.h"
 #include "cuda/array_ops.cuh"
 
+#define ATEN_COUNTER_BITS_SWITCH(bits, IdType, ...)                      \
+  do {                                                              \
+    CHECK((bits) == 32 || (bits) == 64 || (bits) == 16) << "bits must be 16, 32 or 64"; \
+    if ((bits) == 16) {                                             \
+      typedef int16_t IdType;                                       \
+      { __VA_ARGS__ }                                               \
+    } else if ((bits) == 32) {                                             \
+      typedef int32_t IdType;                                       \
+      { __VA_ARGS__ }                                               \
+    } else if ((bits) == 64) {                                      \
+      typedef int64_t IdType;                                       \
+      { __VA_ARGS__ }                                               \
+    } else {                                                        \
+      LOG(FATAL) << "Counter can only be int16_t, int32 or int64";                \
+    }                                                               \
+  } while (0)
+
+
 using namespace dgl::runtime;
 namespace dgl::dev
 {
@@ -45,7 +63,7 @@ DGL_REGISTER_GLOBAL("dev._CAPI_Increment")
     .set_body([](DGLArgs args, DGLRetValue *rv) {
       NDArray count = args[0];
       NDArray row = args[1];
-      ATEN_ID_TYPE_SWITCH(count->dtype, CounterType, {
+      ATEN_COUNTER_BITS_SWITCH(count->dtype.bits, CounterType, {
         ATEN_ID_TYPE_SWITCH(row->dtype, IndexType, {
           Increment<kDGLCUDA, CounterType, IndexType>(count, row);
         });

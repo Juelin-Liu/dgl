@@ -109,21 +109,16 @@ def load_metis_graph(config:Config, node_mode: str, edge_mode: str):
     avg_deg = torch.sum(degree) // degree.shape[0]
     edge_pruned = False
     if load_edge_weight:
-        # print("prunning edges")
+        print("prunning edges")
         flag = edge_weight > 0
         remain_ratio = flag.sum() / flag.shape[0] * 100
-        if remain_ratio < 50:
-            e_num = flag.sum()
-            indices = indices[flag].clone()
-            edge_weight = edge_weight[flag].clone()
-            indptr = CompactCSR(indptr, flag)
-            edge_pruned=True
-            print(f"remove {round(100 - remain_ratio.item())}% edges in {timer.duration()} secs", flush=True)
-        else:
-            if edge_weight.min() == 0:
-                scale = 10
-                edge_weight = edge_weight * scale + 1 # avoid zero weigths for edge
-                
+        e_num = flag.sum()
+        indices = indices[flag].clone()
+        edge_weight = edge_weight[flag].clone()
+        indptr = CompactCSR(indptr, flag)
+        edge_pruned=True
+        print(f"remove {round(100 - remain_ratio.item())}% edges in {timer.duration()} secs", flush=True)
+
     timer.reset()
     if is_sym == False:
         # remove self edges
