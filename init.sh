@@ -21,7 +21,7 @@ popd
 # build oneTBB
 mkdir -p ${SCRIPT_DIR}/third_party/oneTBB/build
 pushd ${SCRIPT_DIR}/third_party/oneTBB/build 
-cmake -DCMAKE_BUILD_TYPE=Release -DTBB_TEST=OFF -DCMAKE_INSTALL_PREFIX=${SCRIPT_DIR}/third_party/build .. 
+cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DTBB_TEST=OFF -DCMAKE_INSTALL_PREFIX=${SCRIPT_DIR}/third_party/build .. 
 cmake --build . -j 
 cmake --install . 
 popd 
