@@ -33,7 +33,7 @@ def _freq(rank: int, config: Config, graph: dgl.DGLGraph, train_idx: torch.Tenso
     if rank == 0:
         print(config)
         
-    sample_config = SampleConfig(rank=rank, batch_size=config.batch_size * config.world_size, world_size=config.world_size, mode=config.sample_mode, fanouts=config.fanouts, reindex=False)
+    sample_config = SampleConfig(rank=rank, batch_size=config.batch_size, world_size=config.world_size, mode=config.sample_mode, fanouts=config.fanouts, reindex=False)
     dataloader = GraphDataloader(graph, train_idx, sample_config)
     UseBitmap(True)
     step = 0
@@ -86,10 +86,10 @@ if __name__ == "__main__":
     data_dir = args.data_dir
     batch_size = args.batch_size
     fanouts = args.fanouts.split(',')
-    # num_epoch=args.num_epoch
-    num_epoch=3
+    num_epoch=args.num_epoch
+
     for idx, fanout in enumerate(fanouts):
-        fanouts[idx] = 20
+        fanouts[idx] = int(fanout)
         
     dir_path = os.path.dirname(os.path.realpath(__file__))
     log_path = os.path.join(dir_path, "logs/exp.csv")
