@@ -11,6 +11,21 @@ from nodepred.model import *
 from dgl.dev import *
 from utils import *
 
+def str_to_bytes(cache_size: str):
+    if "G" in cache_size:
+        n, _ = cache_size.split('G')
+        return float(n) * 1024 * 1024 * 1024
+    elif 'M' in cache_size:
+        n, _ = cache_size.split('M')
+        return float(n) * 1024 * 1024
+    elif 'K' in cache_size:
+        n, _ = cache_size.split('K')
+        return float(n) * 1024
+
+def tensor_to_bytes(t: torch.Tensor):
+    sz = t.nelement() * t.element_size()
+    return sz
+
 def bench_quiver_batch(configs: list[Config]):
     for config in configs:
         assert(config.system == "quiver")
@@ -27,7 +42,16 @@ def bench_quiver_batch(configs: list[Config]):
     csr_topo = quiver.CSRTopo(indptr=indptr, indices=indices)    
     cache_policy = "p2p_clique_replicate" if config.nvlink else "device_replicate"
     device_cache_size = config.cache_size # TODO: dynamically determine cache size
+    
+    if tensor_to_bytes(feat) < str_to_bytes(device_cache_size) * config.world_size:
+        device_cache_size = str(int(tensor_to_bytes(feat) / (1024 * 1024 * config.world_size))) + "MB"
+    
+    print(f"{device_cache_size=}")
     sampling_mode = "UVA"
+    
+    if config.graph_name == "orkut":
+        sampling_mode = "GPU"
+        
     quiver_feat = quiver.Feature(rank=0, device_list=device_list, device_cache_size=device_cache_size, cache_policy=cache_policy, csr_topo=csr_topo)
     quiver_feat.from_cpu_tensor(feat)
     quiver_sampler = quiver.GraphSageSampler(csr_topo=csr_topo, sizes=config.fanouts, device=0, mode=sampling_mode)

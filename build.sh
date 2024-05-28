@@ -1,4 +1,6 @@
 #!/bin/bash
+CUR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+
 export CUDA_HOME="${CUDA_HOME:=/usr/local/cuda}"
 
 echo "CUDA_HOME=$CUDA_HOME"
@@ -12,6 +14,9 @@ cmake -B build -GNinja
 cmake --build build -j
 
 cd python && pip install . && cd ../
+
+export LD_LIBRARY_PATH=${CUR_DIR}/third_party/build/lib:${LD_LIBRARY_PATH}
+export CPATH=${CUR_DIR}/third_party/build/include:${CPATH}
 
 cd third_party/torch-quiver && python3 setup.py build_ext --inplace && cd ../../
 

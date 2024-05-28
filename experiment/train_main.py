@@ -35,7 +35,7 @@ if __name__ == "__main__":
                     hid_size=hid_size,
                     log_path=log_path,
                     data_dir=data_dir,
-                    nvlink=False,
+                    nvlink=True,
                     partition_type=get_partition_type(node_weight, edge_weight, bal),
                     sample_mode=sample_mode)
     if cfg.system == "split":

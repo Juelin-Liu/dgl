@@ -46,6 +46,7 @@ def _freq(rank: int, config: Config, graph: dgl.DGLGraph, train_idx: torch.Tenso
     src_node_weight = torch.zeros((v_num,),dtype=torch.int32, device=rank)
     dst_node_weight = torch.zeros((v_num,),dtype=torch.int32, device=rank)
     edge_weight = torch.zeros((e_num,), dtype=torch.int16, device=rank)
+    edge_weight_cpu = torch.zeros((e_num,),dtype=torch.int32)
     
     for epoch in range(epoch_num):
         for input_nodes, output_nodes, blocks in dataloader:
@@ -58,25 +59,30 @@ def _freq(rank: int, config: Config, graph: dgl.DGLGraph, train_idx: torch.Tenso
                 Increment(dst_node_weight, dst)
                 Increment(src_node_weight, src)
                 Increment(edge_weight, edge_id)
-            log_step(rank, epoch, step, step_per_epoch, timer)
-
+            
+        log_step(rank, epoch, step, step_per_epoch, timer)
+        edge_weight_cpu += edge_weight.to("cpu")
+        edge_weight.zero_()
+        
     dist.barrier()
-    input_node_weight = input_node_weight.cpu() // epoch_num
-    src_node_weight = src_node_weight.cpu() // epoch_num
-    dst_node_weight = dst_node_weight.cpu() // epoch_num
-    edge_weight = edge_weight.cpu().to(torch.int32) // epoch_num
+    if rank == 0:
+        print(f"get weight in {timer.duration()} secs")
+        
+    input_node_weight = input_node_weight.cpu()
+    src_node_weight = src_node_weight.cpu()
+    dst_node_weight = dst_node_weight.cpu()
     dist.all_reduce(input_node_weight)
     dist.all_reduce(src_node_weight)
     dist.all_reduce(dst_node_weight)
-    dist.all_reduce(edge_weight)
+    dist.all_reduce(edge_weight_cpu)
     
     if rank == 0:
         out_dir = os.path.join(config.data_dir, config.graph_name)
         print("saving to", out_dir)
-        save_numpy(input_node_weight.type(torch.int64), f"{out_dir}/input_node_weight.npy")
-        save_numpy(src_node_weight.type(torch.int64), f"{out_dir}/src_node_weight.npy")
-        save_numpy(dst_node_weight.type(torch.int64), f"{out_dir}/dst_node_weight.npy")
-        save_numpy(edge_weight.type(torch.int64), f"{out_dir}/edge_weight.npy")
+        save_numpy(input_node_weight, f"{out_dir}/input_node_weight.npy")
+        save_numpy(src_node_weight, f"{out_dir}/src_node_weight.npy")
+        save_numpy(dst_node_weight, f"{out_dir}/dst_node_weight.npy")
+        save_numpy(edge_weight_cpu, f"{out_dir}/edge_weight.npy")
     ddp_exit()
 
 if __name__ == "__main__":
