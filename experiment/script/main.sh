@@ -1,30 +1,31 @@
-ex#!/bin/bash
+#!/bin/bash
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 source "${SCRIPT_DIR}/env.sh"
 echo "Start Main Benchmark Experiment"
 
-for graph in  products; do #	products papers100M orkut friendster; do
-  for model in sage ; do #gat
-    for system in split ; do
+for graph in  orkut; do #	products papers100M orkut friendster; do
+  for model in sage gat; do #gat
+    for system in p3 ; do
 	    #dgl quiver dist_cache p3; do
       batch_size=(1024)
-      cache_sizes=(10G)
+      cache_sizes=(6G 4G 2G)
       if [ $system == "split" ]; then
           cache_sizes=(10G 8G 6G 4G)
       	  cache_sizes=(6G)
       fi
       if [ $system == "dist_cache" ]; then
-        PYTHONPATH=/spara/third_party/dist_cache/torch-quiver/srcs/python
+        PYTHONPATH=/home/sandeep/juelin/dgl/third_party/dist_cache/torch-quiver/srcs/python
         cache_sizes=(10G 8G 6G)
       fi
       if [ $system == "quiver" ]; then
-        PYTHONPATH=/spara/third_party/torch-quiver/srcs/python
-          cache_sizes=(10G 8G 6G)
+        PYTHONPATH=/home/sandeep/juelin/dgl/third_party/torch-quiver/srcs/python
+          cache_sizes=(6G 4G 2G)
       fi
       for cache_size in ${cache_sizes[@]}; do
         export PYTHONPATH=$PYTHONPATH
-        echo python3 ${python_dir}/train_main.py --world_size=2 --sample_mode=gpu --system=${system} --model=${model} --fanout="15,15,15" --graph=${graph}  --data_dir=${data_dir} --cache_size=${cache_size} --batch_size=${batch_size} --log_file=main.csv 
+        echo $PYTHONPATH
+	python3 ${python_dir}/train_main.py --world_size=4 --sample_mode=gpu --system=${system} --model=${model} --fanout="15,15,15" --graph=${graph}  --data_dir=${data_dir} --cache_size=${cache_size} --batch_size=${batch_size} --log_file=main.csv 
         unset PYTHONPATH
       done
     done

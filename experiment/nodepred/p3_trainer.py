@@ -1,4 +1,5 @@
 import torchmetrics.functional as MF
+
 import torch.distributed as dist
 import gc
 import torch
@@ -85,15 +86,17 @@ def bench_p3_batch(configs: list[Config]):
         torch.cuda.empty_cache()
      
 def train_p3_ddp(rank: int, config: Config, graph: dgl.DGLGraph, global_feat: torch.Tensor, label: torch.Tensor, num_label: int, train_idx: torch.Tensor, test_idx: torch.Tensor):
-    ddp_setup(rank, config.world_size)
+    ddp_setup(rank, config.world_size, config.node_rank, config.num_nodes)
+
+
     device = torch.cuda.current_device()
     e2eTimer = Timer()
 
         
     if global_feat is not None:
-        feat = get_p3_local_feat(rank, config.world_size, global_feat).clone()
+        feat = get_p3_local_feat(rank, config.world_size * config.num_nodes , global_feat).clone()
     else:
-        feat_dim = get_feat_dim(config) // config.world_size
+        feat_dim = get_feat_dim(config) // (config.world_size * config.num_nodes) 
         feat = gen_rand_feat(v_num=graph.num_nodes(), feat_dim=feat_dim)
 
     config.in_feat = feat.shape[1]
@@ -109,7 +112,7 @@ def train_p3_ddp(rank: int, config: Config, graph: dgl.DGLGraph, global_feat: to
         feat_handle  = pin_memory_inplace(feat)
         label_handle = pin_memory_inplace(label)
     graph = graph.pin_memory_()    
-    mode = "uva"
+    mode = config.sample_mode
 
     if rank == 0:
         print(config)

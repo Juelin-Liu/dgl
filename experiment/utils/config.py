@@ -4,7 +4,7 @@ import pandas as pd
 class Config:
     def __init__(self, graph_name, world_size,  node_rank, num_nodes, num_partition, num_epoch, fanouts,
                  batch_size, system, model, hid_size, cache_size, log_path, data_dir,
-                 nvlink = False, partition_type="ndst_efreq_xbal", sample_mode="uva"):
+                 nvlink = True, partition_type="ndst_efreq_xbal", sample_mode="uva"):
         try:
             self.machine_name = os.environ['MACHINE_NAME']
         except Exception as e:
@@ -49,7 +49,7 @@ class Config:
         machine_name = self.machine_name + connection
         return [pd.Timestamp('now'), machine_name, self.graph_name, self.in_feat,\
                 f"{str(self.world_size)} * {str(self.num_nodes)}", self.num_partition, self.num_epoch, self.fanouts, self.num_redundant_layer, \
-                    self.batch_size, self.system, self.model, self.hid_size, self.cache_size, self.partition_type]
+                    self.batch_size, self.system, self.model, self.hid_size, self.cache_size, self.partition_type, self.sample_mode]
 
     def __repr__(self):
         res = ""

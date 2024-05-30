@@ -40,7 +40,7 @@ def train_dgl(rank: int, config: Config, graph: dgl.DGLGraph, feat: torch.Tensor
     e2eTimer = Timer()
     if rank == 0:
         print(config)
-    mode = "uva"
+    mode = config.sample_mode
     dist.barrier()
     feat_handle  = pin_memory_inplace(feat)
     label = label.to(device)
