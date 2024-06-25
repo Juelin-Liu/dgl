@@ -377,7 +377,7 @@ endif()
 
 target_include_directories(dgl PRIVATE ${CMAKE_SOURCE_DIR}/third_party/build/include)
 target_link_directories(dgl PRIVATE ${CMAKE_SOURCE_DIR}/third_party/build/lib)
-list(APPEND DGL_LINKER_LIBS metis GKlib tbb tbbmalloc nccl)
+list(APPEND DGL_LINKER_LIBS GKlib metis tbb tbbmalloc nccl)
 
 # Avoid exposing third-party symbols when using DGL as a library.
 if((NOT MSVC) AND (NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin"))

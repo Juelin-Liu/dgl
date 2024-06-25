@@ -9,7 +9,7 @@ bash init.sh
 
 rm -rf build
 
-cmake -B build -GNinja
+cmake -B build -GNinja -DCMAKE_BUILD_TYPE=debug -DBUILD_TYPE=debug
 
 cmake --build build -j
 

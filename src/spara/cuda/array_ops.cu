@@ -88,6 +88,7 @@ __global__ void Increment(
   const int64_t tIdx = threadIdx.x + blockIdx.x * blockDim.x;
   if (tIdx < num_item) {
     const IndexType rIdx = row[tIdx];
+    assert(rIdx < array_len);
     atomicAdd(array + rIdx, static_cast<int16_t>(1));
   }
 }
@@ -99,6 +100,7 @@ __global__ void Increment(
   const int64_t tIdx = threadIdx.x + blockIdx.x * blockDim.x;
   if (tIdx < num_item) {
     const IndexType rIdx = row[tIdx];
+    assert(rIdx < array_len);
     aten::cuda::AtomicAdd(array + rIdx, static_cast<CounterType>(1));
   }
 }
@@ -206,8 +208,7 @@ template void Mask<kDGLCUDA, int32_t>(NDArray&, NDArray);
 template void Mask<kDGLCUDA, int64_t>(NDArray&, NDArray);
 template NDArray Flagged<kDGLCUDA, int32_t>(const NDArray&, DGLContext);
 template NDArray Flagged<kDGLCUDA, int64_t>(const NDArray&, DGLContext);
-// template void Increment<kDGLCUDA, int32_t>(NDArray&, const NDArray&);
-// template void Increment<kDGLCUDA, int64_t>(NDArray&, const NDArray&);
+
 template void Increment<kDGLCUDA, int16_t, int32_t>(NDArray&, const NDArray&);
 template void Increment<kDGLCUDA, int16_t, int64_t>(NDArray&, const NDArray&);
 
