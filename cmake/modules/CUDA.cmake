@@ -1,6 +1,6 @@
 # CUDA Module
 if(USE_CUDA)
-  find_cuda(${USE_CUDA} REQUIRED)
+  find_package(CUDA REQUIRED)
 else(USE_CUDA)
   return()
 endif()

@@ -4,7 +4,6 @@ cmake_minimum_required(VERSION 3.18)
 ########################################
 project(dgl C CXX)
 message(STATUS "Start configuring project ${PROJECT_NAME}")
-
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -46,6 +45,12 @@ dgl_option(EXTERNAL_GKLIB_PATH "Path to external gklib" OFF)
 # NOTE: Please avoid editing this file to change feature options for a local
 # build. Instead, using bash script/build_dgl.sh -e '-DFEATURE_NAME=ON/OFF' to
 # overwrite the value.
+dgl_feature_option(
+    BUILD_SPARA
+    "Build spara library"
+    "all"
+)
+
 dgl_feature_option(
     BUILD_SPARSE
     "Build DGL sparse library"
@@ -241,6 +246,30 @@ if(USE_CUDA)
     src/graph/sampling/randomwalks/*.cu
   )
   list(APPEND DGL_SRC ${DGL_CUDA_SRC})
+
+
+  if(BUILD_SPARA)
+    message(STATUS "BUILD SPARA")
+
+    find_program(NVHPC_CXX_BIN "nvc++" REQUIRED)
+    string(REPLACE "compilers/bin/nvc++" "cmake" NVHPC_CMAKE_DIR ${NVHPC_CXX_BIN})
+    set(CMAKE_PREFIX_PATH ${NVHPC_CMAKE_DIR})
+    set(NVHPC_CUDA_VERSION 12.5)
+    set(CUDA_ARCHITECTURES native)
+    find_package(NVHPC REQUIRED Components NCCL PROFILER)
+    # find_package(NVHPC REQUIRED Components NCCL PROFILER NVSHMEM MPI MATH)
+
+    file(GLOB_RECURSE SPARA_CUDA_SRC
+      src/spara/cuda/*.cu 
+      src/spara/*.cc
+    )
+    list (APPEND DGL_SRC ${SPARA_CUDA_SRC})
+    list (APPEND DGL_LINKER_LIBS NVHPC::NCCL NVHPC::PROFILER)
+
+    message(STATUS "NVHPC_CMAKE_DIR ${NVHPC_CMAKE_DIR}")
+    message(STATUS "DGL_LINKER_LIBS ${DGL_LINKER_LIBS}")
+  endif(BUILD_SPARA)
+
   dgl_config_cuda(DGL_LINKER_LIBS)
   cuda_add_library(dgl SHARED ${DGL_SRC})
 else(USE_CUDA)
