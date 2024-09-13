@@ -1,0 +1,30 @@
+Brotli @ file:///home/conda/feedstock_root/build_artifacts/brotli-split_1725267488082/work
+certifi @ file:///home/conda/feedstock_root/build_artifacts/certifi_1725278078093/work/certifi
+cffi @ file:///home/conda/feedstock_root/build_artifacts/cffi_1725560558132/work
+charset-normalizer @ file:///home/conda/feedstock_root/build_artifacts/charset-normalizer_1698833585322/work
+filelock @ file:///home/conda/feedstock_root/build_artifacts/filelock_1725740553553/work
+gmpy2 @ file:///home/conda/feedstock_root/build_artifacts/gmpy2_1725379832114/work
+h2 @ file:///home/conda/feedstock_root/build_artifacts/h2_1634280454336/work
+hpack==4.0.0
+hyperframe @ file:///home/conda/feedstock_root/build_artifacts/hyperframe_1619110129307/work
+idna @ file:///home/conda/feedstock_root/build_artifacts/idna_1724450538981/work
+Jinja2 @ file:///home/conda/feedstock_root/build_artifacts/jinja2_1715127149914/work
+MarkupSafe @ file:///home/conda/feedstock_root/build_artifacts/markupsafe_1724959475686/work
+mpmath @ file:///home/conda/feedstock_root/build_artifacts/mpmath_1678228039184/work
+networkx @ file:///home/conda/feedstock_root/build_artifacts/networkx_1712540363324/work
+numpy @ file:///home/conda/feedstock_root/build_artifacts/numpy_1725411817006/work/dist/numpy-2.1.1-cp312-cp312-linux_x86_64.whl#sha256=cd5cac2a2861e1631cfe0afbe7c714190d854a4df5dc111aa5d306900d2d3abe
+pillow @ file:///home/conda/feedstock_root/build_artifacts/pillow_1726075084513/work
+pycparser @ file:///home/conda/feedstock_root/build_artifacts/pycparser_1711811537435/work
+PySocks @ file:///home/conda/feedstock_root/build_artifacts/pysocks_1661604839144/work
+PyYAML @ file:///home/conda/feedstock_root/build_artifacts/pyyaml_1725456134219/work
+requests @ file:///home/conda/feedstock_root/build_artifacts/requests_1717057054362/work
+setuptools==73.0.1
+sympy @ file:///home/conda/feedstock_root/build_artifacts/sympy_1723500264960/work
+torch==2.4.1
+torchaudio==2.4.1
+torchvision==0.19.1
+triton==3.0.0
+typing_extensions @ file:///home/conda/feedstock_root/build_artifacts/typing_extensions_1717802530399/work
+urllib3 @ file:///home/conda/feedstock_root/build_artifacts/urllib3_1719391292974/work
+wheel==0.44.0
+zstandard==0.23.0
