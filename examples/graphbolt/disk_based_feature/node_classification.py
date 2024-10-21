@@ -336,9 +336,11 @@ def parse_args():
             "ogbn-arxiv",
             "ogbn-products",
             "ogbn-papers100M",
-            "reddit",
-            "yelp",
-            "flickr",
+            "igb-hom-tiny",
+            "igb-hom-small",
+            "igb-hom-medium",
+            "igb-hom-large",
+            "igb-hom",
         ],
     )
     parser.add_argument("--root", type=str, default="datasets")
@@ -376,13 +378,13 @@ def parse_args():
         "--cpu-cache-size-in-gigabytes",
         type=float,
         default=0,
-        help="The capacity of the CPU cache, the number of features to store.",
+        help="The capacity of the CPU cache in GiB.",
     )
     parser.add_argument(
         "--gpu-cache-size-in-gigabytes",
         type=float,
         default=0,
-        help="The capacity of the GPU cache, the number of features to store.",
+        help="The capacity of the GPU cache in GiB.",
     )
     parser.add_argument("--early-stopping-patience", type=int, default=25)
     parser.add_argument(
@@ -457,7 +459,7 @@ def main():
     if args.cpu_cache_size_in_gigabytes > 0 and isinstance(
         features[("node", None, "feat")], gb.DiskBasedFeature
     ):
-        features[("node", None, "feat")] = gb.CPUCachedFeature(
+        features[("node", None, "feat")] = gb.cpu_cached_feature(
             features[("node", None, "feat")],
             int(args.cpu_cache_size_in_gigabytes * 1024 * 1024 * 1024),
             args.cpu_feature_cache_policy,
@@ -474,7 +476,7 @@ def main():
     host-to-device copy operations for this feature.
     """
     if args.gpu_cache_size_in_gigabytes > 0 and args.feature_device != "cuda":
-        features[("node", None, "feat")] = gb.GPUCachedFeature(
+        features[("node", None, "feat")] = gb.gpu_cached_feature(
             features[("node", None, "feat")],
             int(args.gpu_cache_size_in_gigabytes * 1024 * 1024 * 1024),
         )

@@ -151,7 +151,7 @@ class TorchBasedFeature(Feature):
         -------
         A generator object.
             The returned generator object returns a future on
-            ``read_async_num_stages(ids.device)``th invocation. The return result
+            ``read_async_num_stages(ids.device)``\ th invocation. The return result
             can be accessed by calling ``.wait()``. on the returned future object.
             It is undefined behavior to call ``.wait()`` more than once.
 
@@ -238,6 +238,16 @@ class TorchBasedFeature(Feature):
             The size of the feature.
         """
         return self._tensor.size()[1:]
+
+    def count(self):
+        """Get the count of the feature.
+
+        Returns
+        -------
+        int
+            The count of the feature.
+        """
+        return self._tensor.size()[0]
 
     def update(self, value: torch.Tensor, ids: torch.Tensor = None):
         """Update the feature store.
@@ -424,7 +434,7 @@ class DiskBasedFeature(Feature):
         -------
         A generator object.
             The returned generator object returns a future on
-            ``read_async_num_stages(ids.device)``th invocation. The return result
+            ``read_async_num_stages(ids.device)``\ th invocation. The return result
             can be accessed by calling ``.wait()``. on the returned future object.
             It is undefined behavior to call ``.wait()`` more than once.
 
@@ -492,6 +502,16 @@ class DiskBasedFeature(Feature):
             The size of the feature.
         """
         return self._tensor.size()[1:]
+
+    def count(self):
+        """Get the count of the feature.
+
+        Returns
+        -------
+        int
+            The count of the feature.
+        """
+        return self._tensor.size()[0]
 
     def update(self, value: torch.Tensor, ids: torch.Tensor = None):
         """Disk based feature does not support update for now."""
