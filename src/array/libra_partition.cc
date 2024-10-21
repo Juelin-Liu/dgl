@@ -258,7 +258,7 @@ void LibraVertexCut(
       }
     }
   }
-  delete cache;
+  delete[] cache;
 
   for (int64_t c = 0; c < nc; c++) {
     std::string path = prefix + "/community" + std::to_string(c) + ".txt";

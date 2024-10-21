@@ -1,6 +1,6 @@
 # CUDA Module
 if(USE_CUDA)
-  find_package(CUDA REQUIRED)
+  find_package(CUDAToolkit REQUIRED)
 else(USE_CUDA)
   return()
 endif()
@@ -210,7 +210,7 @@ endfunction()
 # Usage:
 #  dgl_config_cuda(linker_libs)
 macro(dgl_config_cuda linker_libs)
-  if(NOT CUDA_FOUND)
+  if(NOT CUDAToolkit_FOUND)
     message(FATAL_ERROR "Cannot find CUDA.")
   endif()
   # always set the includedir when cuda is available
@@ -236,11 +236,13 @@ macro(dgl_config_cuda linker_libs)
   endif(USE_OPENMP)
 
   # 1. Add arch flags
-  dgl_select_nvcc_arch_flags(NVCC_FLAGS_ARCH)
-  list(APPEND CUDA_NVCC_FLAGS ${NVCC_FLAGS_ARCH})
+  # dgl_select_nvcc_arch_flags(NVCC_FLAGS_ARCH)
+  # list(APPEND CUDA_NVCC_FLAGS ${NVCC_FLAGS_ARCH})
 
   # 2. flags in third_party/moderngpu
-  list(APPEND CUDA_NVCC_FLAGS "--expt-extended-lambda;-Wno-deprecated-declarations;-std=c++17")
+  # list(APPEND CUDA_NVCC_FLAGS "--expt-extended-lambda")
+  # list(APPEND CUDA_NVCC_FLAGS "-Wno-deprecated-declarations")
+  # list(APPEND CUDA_NVCC_FLAGS "-std=c++17")
 
   message(STATUS "CUDA_NVCC_FLAGS: ${CUDA_NVCC_FLAGS}")
 

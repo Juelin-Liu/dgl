@@ -2,10 +2,11 @@ cmake_minimum_required(VERSION 3.18)
 ########################################
 # Borrowed and adapted from TVM project
 ########################################
-project(dgl C CXX)
+project(dgl C CXX CUDA)
 message(STATUS "Start configuring project ${PROJECT_NAME}")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+find_package(CUDAToolkit REQUIRED)
 
 # cmake utils
 include(cmake/util/Util.cmake)
@@ -18,7 +19,7 @@ include(cmake/util/FindCUDA.cmake)
 dgl_option(BUILD_TYPE "Type of the build: dev, dogfood or release" "dev")
 message(STATUS "Build for ${BUILD_TYPE}")
 
-dgl_option(USE_CUDA "Build with CUDA" OFF)
+dgl_option(USE_CUDA "Build with CUDA" ON)
 dgl_option(TORCH_PYTHON_INTERPS "Python interpreter for building sub-components" python3)
 
 # Conda build related options.
@@ -80,7 +81,7 @@ dgl_feature_option(
 dgl_feature_option(
     BUILD_GRAPHBOLT
     "Build Graphbolt library"
-    "all"
+    "none"
 )
 
 dgl_feature_option(
@@ -143,12 +144,11 @@ endif()
 
 if(USE_CUDA)
   message(STATUS "Build with CUDA support")
-  project(dgl C CXX)
   include(cmake/modules/CUDA.cmake)
   message(STATUS "Use external CCCL library for a consistent API and performance.")
-  cuda_include_directories(BEFORE "${CMAKE_SOURCE_DIR}/third_party/cccl/thrust")
-  cuda_include_directories(BEFORE "${CMAKE_SOURCE_DIR}/third_party/cccl/cub")
-  cuda_include_directories(BEFORE "${CMAKE_SOURCE_DIR}/third_party/cccl/libcudacxx/include")
+  include_directories(BEFORE "${CMAKE_SOURCE_DIR}/third_party/cccl/thrust")
+  include_directories(BEFORE "${CMAKE_SOURCE_DIR}/third_party/cccl/cub")
+  include_directories(BEFORE "${CMAKE_SOURCE_DIR}/third_party/cccl/libcudacxx/include")
 endif(USE_CUDA)
 
 # initial variables
@@ -250,30 +250,46 @@ if(USE_CUDA)
 
   if(BUILD_SPARA)
     message(STATUS "BUILD SPARA")
-
-    find_program(NVHPC_CXX_BIN "nvc++" REQUIRED)
-    string(REPLACE "compilers/bin/nvc++" "cmake" NVHPC_CMAKE_DIR ${NVHPC_CXX_BIN})
-    set(CMAKE_PREFIX_PATH ${NVHPC_CMAKE_DIR})
-    set(NVHPC_CUDA_VERSION 12.5)
     set(CUDA_ARCHITECTURES native)
-    find_package(NVHPC REQUIRED Components NCCL PROFILER)
-    # find_package(NVHPC REQUIRED Components NCCL PROFILER NVSHMEM MPI MATH)
+    set(CMAKE_CUDA_ARCHITECTURES native)
+    
+    set(CMAKE_CXX_STANDARD 17)
+    set(CMAKE_CUDA_STANDARD 17)
 
     file(GLOB_RECURSE SPARA_CUDA_SRC
       src/spara/cuda/*.cu 
       src/spara/*.cc
     )
+
     list (APPEND DGL_SRC ${SPARA_CUDA_SRC})
-    list (APPEND DGL_LINKER_LIBS NVHPC::NCCL NVHPC::PROFILER)
+    add_library(dgl SHARED ${DGL_SRC})
 
-    message(STATUS "NVHPC_CMAKE_DIR ${NVHPC_CMAKE_DIR}")
+    
+    # Define the Python code as a one-liner to run
+    find_program(PYTHON_EXECUTABLE NAMES python3 python)
+    set(PYTHON_CODE "import nvidia; print(nvidia.__path__[0])")
+    # Run the Python code using execute_process()
+    execute_process(
+        COMMAND ${PYTHON_EXECUTABLE} -c "${PYTHON_CODE}"
+        OUTPUT_VARIABLE NVIDIA_PATH
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+
+  
+    target_compile_options(dgl PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--expt-extended-lambda --expt-relaxed-constexpr -Wno-deprecated-declarations>)
+    target_compile_options(dgl PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wno-deprecated-declarations>)
+    
+    # nccl and nvtx
+    target_link_directories(dgl PRIVATE ${NVIDIA_PATH}/nccl/lib)
+    target_include_directories(dgl PRIVATE ${NVIDIA_PATH}/nccl/include)
+    target_include_directories(dgl PRIVATE ${CMAKE_SOURCE_DIR}/third_party/nvtx/c/include)
+    dgl_config_cuda(DGL_LINKER_LIBS)
+
+    message(STATUS "NVIDIA_PATH ${NVIDIA_PATH}")
     message(STATUS "DGL_LINKER_LIBS ${DGL_LINKER_LIBS}")
-  endif(BUILD_SPARA)
+    list(APPEND DGL_LINKER_LIBS CUDA::toolkit CUDA::cublas CUDA::cublasLt nccl)
 
-  dgl_config_cuda(DGL_LINKER_LIBS)
-  cuda_add_library(dgl SHARED ${DGL_SRC})
-else(USE_CUDA)
-  add_library(dgl SHARED ${DGL_SRC})
+  endif(BUILD_SPARA)
 endif(USE_CUDA)
 
 if ((NOT MSVC) AND USE_EPOLL)
@@ -410,7 +426,8 @@ if(USE_CUDA)
   file(GLOB gpu_cache_src
     third_party/HugeCTR/gpu_cache/src/nv_gpu_cache.cu
   )
-  cuda_add_library(gpu_cache STATIC ${gpu_cache_src})
+  add_library(gpu_cache STATIC ${gpu_cache_src})
+  target_compile_options(gpu_cache PRIVATE -fPIC)
   target_include_directories(gpu_cache PRIVATE "third_party/HugeCTR/gpu_cache/include")
   target_include_directories(dgl PRIVATE "third_party/HugeCTR/gpu_cache/include")
   list(APPEND DGL_LINKER_LIBS gpu_cache)
@@ -444,7 +461,7 @@ if(BUILD_TORCH)
       tensoradapter_pytorch
       ${CMAKE_COMMAND} -E env
       CMAKE_COMMAND=${CMAKE_CMD}
-      CUDA_TOOLKIT_ROOT_DIR=${CUDA_TOOLKIT_ROOT_DIR}
+      CUDA_TOOLKIT_ROOT_DIR=$ENV{CUDA_TOOLKIT_ROOT_DIR}
       USE_CUDA=${USE_CUDA}
       EXTERNAL_DMLC_LIB_PATH=${EXTERNAL_DMLC_LIB_PATH}
       BINDIR=${BINDIR}
@@ -457,7 +474,7 @@ if(BUILD_TORCH)
       tensoradapter_pytorch
       ${CMAKE_COMMAND} -E env
       CMAKE_COMMAND=${CMAKE_CMD}
-      CUDA_TOOLKIT_ROOT_DIR=${CUDA_TOOLKIT_ROOT_DIR}
+      CUDA_TOOLKIT_ROOT_DIR=$ENV{CUDA_TOOLKIT_ROOT_DIR}
       USE_CUDA=${USE_CUDA}
       EXTERNAL_DMLC_LIB_PATH=${EXTERNAL_DMLC_LIB_PATH}
       BINDIR=${CMAKE_CURRENT_BINARY_DIR}
@@ -504,7 +521,7 @@ if(BUILD_SPARSE)
       ALL
       ${CMAKE_COMMAND} -E env
       CMAKE_COMMAND=${CMAKE_CMD}
-      CUDA_TOOLKIT_ROOT_DIR=${CUDA_TOOLKIT_ROOT_DIR}
+      CUDA_TOOLKIT_ROOT_DIR=$ENV{CUDA_TOOLKIT_ROOT_DIR}
       USE_CUDA=${USE_CUDA}
       BINDIR=${BINDIR}
       INCLUDEDIR="${DGL_INCLUDE_DIRS}"
@@ -521,7 +538,7 @@ if(BUILD_SPARSE)
       ALL
       ${CMAKE_COMMAND} -E env
       CMAKE_COMMAND=${CMAKE_CMD}
-      CUDA_TOOLKIT_ROOT_DIR=${CUDA_TOOLKIT_ROOT_DIR}
+      CUDA_TOOLKIT_ROOT_DIR=$ENV{CUDA_TOOLKIT_ROOT_DIR}
       USE_CUDA=${USE_CUDA}
       BINDIR=${CMAKE_CURRENT_BINARY_DIR}
       INCLUDEDIR="${DGL_INCLUDE_DIRS}"

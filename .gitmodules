@@ -37,3 +37,6 @@
 [submodule "third_party/tsl_robin_map"]
 	path = third_party/tsl_robin_map
 	url = https://github.com/Tessil/robin-map.git
+[submodule "third_party/nvtx"]
+	path = third_party/nvtx
+	url = https://github.com/NVIDIA/NVTX.git
