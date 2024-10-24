@@ -1,0 +1,7 @@
+reports
+nsys
+logs
+*.nsys-rep
+hpc_scripts
+old
+nohup.out
