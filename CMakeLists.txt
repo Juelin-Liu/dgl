@@ -287,7 +287,7 @@ if(USE_CUDA)
 
     message(STATUS "NVIDIA_PATH ${NVIDIA_PATH}")
     message(STATUS "DGL_LINKER_LIBS ${DGL_LINKER_LIBS}")
-    list(APPEND DGL_LINKER_LIBS CUDA::toolkit CUDA::cublas CUDA::cublasLt nccl)
+    list(APPEND DGL_LINKER_LIBS CUDA::toolkit CUDA::cublas CUDA::cublasLt ${NVIDIA_PATH}/nccl/lib/libnccl.so.2)
 
   endif(BUILD_SPARA)
 endif(USE_CUDA)
