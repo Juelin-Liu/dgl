@@ -8,10 +8,11 @@ from nodepred.model import *
 from utils import *
 from dgl.dev.dataloader import *
 from dgl.dev import CudaProfilerStart, CudaProfilerStop
+from dgl import graphbolt as gb 
 
-def bench_dgl_batch(configs: list[Config]):
+def bench_dgl_graphbolt_batch(configs: list[Config]):
     for config in configs:
-        assert("dgl" in config.system)
+        assert("graphbolt" in config.system)
         assert(config.graph_name == configs[0].graph_name)
         assert(config.model == configs[0].model)
         
@@ -46,6 +47,12 @@ def train_dgl(rank: int, config: Config, graph: dgl.DGLGraph, feat: torch.Tensor
     sample_config = SampleConfig(rank=rank, batch_size=config.batch_size, world_size=config.world_size, mode=mode, fanouts=config.fanouts)
     dataloader = GraphDataloader(graph, train_idx, sample_config)
     config.in_feat = feat.shape[1]
+    config.test_model_acc = True 
+    print("Force accuracy collection")
+    num_elements = feat.shape[0]  * 1
+    cache_size_in_bytes  = num_elements *  feat[:1].element_size() * feat[:1].numel()
+    cached_feat_store = gb.gpu_cached_feature(gb.TorchBasedFeature(feat), cache_size_in_bytes)
+    
     model = None
     if config.model == "gat":
         model = Gat(in_feats=feat.shape[1], hid_feats=config.hid_size, num_layers=len(config.fanouts), out_feats=num_label, num_heads=4)
@@ -56,22 +63,25 @@ def train_dgl(rank: int, config: Config, graph: dgl.DGLGraph, feat: torch.Tensor
         model = DDP(model, device_ids=[rank])
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     
-    # print(f"preheating trainer on device: {device}")
-    # step = 0
-    # for input_nodes, output_nodes, blocks in dataloader:
-    #     step += 1
-    #     batch_feat = gather_pinned_tensor_rows(feat, input_nodes)
-    #     batch_label = gather_pinned_tensor_rows(label, output_nodes)
-    #     batch_pred = model(blocks, batch_feat)
-    #     batch_loss = torch.nn.functional.cross_entropy(batch_pred, batch_label)
-    #     optimizer.zero_grad()
-    #     batch_loss.backward()
-    #     optimizer.step()
-    #     if step > 100:
-    #         dataloader.reset()
-    #         break
+    print(f"preheating trainer on device: {device}")
+    step = 0
+    for input_nodes, output_nodes, blocks in dataloader:
+        step += 1
+        batch_feat = cached_feat_store.read(input_nodes)
+        # batch_feat = gather_pinned_tensor_rows(feat, input_nodes)
+        batch_label = label[output_nodes]
+        # batch_label = gather_pinned_tensor_rows(label, output_nodes)
+        batch_pred = model(blocks, batch_feat)
+        batch_loss = torch.nn.functional.cross_entropy(batch_pred, batch_label)
+        optimizer.zero_grad()
+        batch_loss.backward()
+        optimizer.step()
+        if step > 100:
+            dataloader.reset()
+            break
         
-    # dist.barrier()
+    dist.barrier()
+
     CudaProfilerStart()
     print(f"training model on device: {device}")        
     timer = Timer()
@@ -89,7 +99,8 @@ def train_dgl(rank: int, config: Config, graph: dgl.DGLGraph, feat: torch.Tensor
             step += 1
             sampling_timer.end()
             feat_timer = CudaTimer()
-            batch_feat = gather_pinned_tensor_rows(feat, input_nodes)
+            batch_feat = cached_feat_store.read(input_nodes)
+            # batch_feat = gather_pinned_tensor_rows(feat, input_nodes)
             batch_label = label[output_nodes]
             dist.barrier()
             feat_timer.end()            

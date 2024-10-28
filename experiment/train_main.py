@@ -44,6 +44,9 @@ if __name__ == "__main__":
     elif cfg.system == "dgl":
         from nodepred.trainer import bench_dgl_batch
         bench_dgl_batch([cfg])
+    elif cfg.system == "graphbolt":
+        from nodepred.trainer import bench_dgl_graphbolt_batch
+        bench_dgl_graphbolt_batch([cfg])
     elif cfg.system == "quiver":
         from nodepred.quiver_trainer import bench_quiver_batch
         bench_quiver_batch([cfg])
